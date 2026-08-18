@@ -42,6 +42,25 @@ const api = {
   testAccount: (connection: unknown) => ipcRenderer.invoke('test-account', connection),
   syncAccounts: () => ipcRenderer.invoke('sync-accounts'),
   encryptionAvailable: () => ipcRenderer.invoke('encryption-available'),
+  logEntries: () => ipcRenderer.invoke('log-entries'),
+  logPath: () => ipcRenderer.invoke('log-path'),
+  logClear: () => ipcRenderer.invoke('log-clear'),
+  logOpenFolder: () => ipcRenderer.invoke('log-open-folder'),
+  crashReportUrl: (index: number) => ipcRenderer.invoke('crash-report-url', index),
+  reportRendererError: (message: string, detail: string) =>
+    ipcRenderer.invoke('report-renderer-error', message, detail),
+  onCrash: (handler: (entry: unknown) => void) => {
+    const listener = (_e: unknown, entry: unknown) => handler(entry)
+    ipcRenderer.on('crash', listener)
+    return () => ipcRenderer.removeListener('crash', listener)
+  },
+  aycdStatus: () => ipcRenderer.invoke('aycd-status'),
+  aycdSetKey: (key: string) => ipcRenderer.invoke('aycd-set-key', key),
+  aycdClearKey: () => ipcRenderer.invoke('aycd-clear-key'),
+  aycdSetAddresses: (addresses: string[]) => ipcRenderer.invoke('aycd-set-addresses', addresses),
+  aycdVerify: () => ipcRenderer.invoke('aycd-verify'),
+  aycdStart: () => ipcRenderer.invoke('aycd-start'),
+  aycdStop: () => ipcRenderer.invoke('aycd-stop'),
   mailDir: () => ipcRenderer.invoke('mail-dir'),
   rescan: () => ipcRenderer.invoke('rescan'),
   openMailDir: () => ipcRenderer.invoke('open-mail-dir'),

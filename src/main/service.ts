@@ -226,12 +226,13 @@ export class AppService {
        ORDER BY p.ordered_at DESC`,
     ).all() as Record<string, unknown>[]
 
-    return rows.map((row) => {
+    const orders: PurchaseView[] = rows.map((row) => {
       const currency = (row.currency as Money['currency']) ?? 'EUR'
       const total = money(row.total_minor as number, currency)
       const outstanding = row.refund_outstanding as number
       return {
         id: row.id as string,
+        kind: 'buy',
         retailer: row.retailer as string,
         reference: (row.external_order_id as string | null) ?? null,
         orderedAt: row.ordered_at as string,
@@ -246,6 +247,33 @@ export class AppService {
         refundOutstanding: outstanding > 0 ? formatMoney(money(outstanding, currency)) : null,
       }
     })
+
+    // A cancellation whose order was never captured has nothing to attach to,
+    // but it is still something that happened and belongs on the same list —
+    // hidden away in its own panel it is easy to miss that money is owed.
+    const attached = new Set(orders.map((order) => `${order.retailer}|${order.reference}`))
+    const orphans: PurchaseView[] = this.listCancellations()
+      .filter((c) => !attached.has(`${c.retailer}|${c.reference}`))
+      .map((c) => ({
+        id: c.id,
+        kind: 'cancel',
+        retailer: c.retailer,
+        reference: c.reference,
+        orderedAt: c.occurredAt,
+        title: c.title,
+        quantity: 1,
+        // bol.com states no amount in a cancellation, so there is nothing
+        // honest to put in these columns.
+        unit: '\u2014',
+        shipping: '\u2014',
+        total: '\u2014',
+        totalMinor: 0,
+        totalsConsistent: false,
+        status: 'cancelled',
+        refundOutstanding: null,
+      }))
+
+    return [...orders, ...orphans].sort((a, b) => (a.orderedAt < b.orderedAt ? 1 : -1))
   }
 
   listCancellations(): CancellationView[] {
@@ -683,6 +711,8 @@ export interface ShipmentView {
 
 export interface PurchaseView {
   id: string
+  /** `buy` for an order, `cancel` for a cancellation with no order to attach to. */
+  kind: 'buy' | 'cancel'
   retailer: string
   reference: string | null
   orderedAt: string

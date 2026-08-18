@@ -6,6 +6,7 @@ import { Purchases } from './screens/Purchases.js'
 import { Review } from './screens/Review.js'
 import { Settings } from './screens/Settings.js'
 import { Placeholder } from './screens/Placeholder.js'
+import { Logs } from './screens/Logs.js'
 import { TitleBar } from './TitleBar.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { Updater } from './Updater.js'
@@ -20,6 +21,7 @@ const NAV = [
   { label: 'Review', hue: 350 },
   { label: 'Reports', hue: 260 },
   { label: 'Settings', hue: 220 },
+  { label: 'Logs', hue: 20 },
 ] as const
 
 const SUBTITLES: Record<string, string> = {
@@ -31,6 +33,7 @@ const SUBTITLES: Record<string, string> = {
   Review: 'Emails no parser recognised',
   Reports: 'P&L, VAT and currency exposure',
   Settings: 'Mailboxes and integrations',
+  Logs: 'Errors, warnings and crash reports',
 }
 
 export type Screen = (typeof NAV)[number]['label']
@@ -42,6 +45,7 @@ export function App() {
   const [flash, setFlash] = useState<string | null>(null)
   const [updaterOpen, setUpdaterOpen] = useState(false)
   const [syncing, setSyncing] = useState(false)
+  const [crashCount, setCrashCount] = useState(0)
 
   const refresh = useCallback(async () => {
     setSummary(await api.summary())
@@ -51,9 +55,32 @@ export function App() {
     void refresh()
     // The main process ingests on launch and whenever new mail lands, so the UI
     // follows along rather than asking anyone to import anything.
-    return api.onMailUpdated(() => {
+    const offMail = api.onMailUpdated(() => {
       void refresh()
     })
+    const offCrash = api.onCrash(() => setCrashCount((n) => n + 1))
+
+    // A renderer fault should reach the same log as everything else, rather
+    // than disappearing into a console nobody has open.
+    const onError = (event: ErrorEvent) => {
+      void api.reportRendererError(event.message, event.error?.stack ?? '')
+    }
+    const onRejection = (event: PromiseRejectionEvent) => {
+      const reason = event.reason
+      void api.reportRendererError(
+        reason instanceof Error ? reason.message : String(reason),
+        reason instanceof Error ? reason.stack ?? '' : '',
+      )
+    }
+    window.addEventListener('error', onError)
+    window.addEventListener('unhandledrejection', onRejection)
+
+    return () => {
+      offMail()
+      offCrash()
+      window.removeEventListener('error', onError)
+      window.removeEventListener('unhandledrejection', onRejection)
+    }
   }, [refresh])
 
   /**
@@ -101,7 +128,10 @@ export function App() {
           <button
             key={item.label}
             className={`nav-item${screen === item.label ? ' active' : ''}`}
-            onClick={() => setScreen(item.label)}
+            onClick={() => {
+              setScreen(item.label)
+              if (item.label === 'Logs') setCrashCount(0)
+            }}
           >
             <span className="nav-left">
               <span
@@ -112,6 +142,9 @@ export function App() {
             </span>
             {item.label === 'Review' && summary && summary.reviewCount > 0 && (
               <span className="nav-badge">{summary.reviewCount}</span>
+            )}
+            {item.label === 'Logs' && crashCount > 0 && (
+              <span className="nav-badge">{crashCount}</span>
             )}
           </button>
         ))}
@@ -181,6 +214,7 @@ export function App() {
           {screen === 'Shipments' && <Shipments query={query} />}
           {screen === 'Purchases' && <Purchases query={query} />}
           {screen === 'Review' && <Review />}
+          {screen === 'Logs' && <Logs />}
           {screen === 'Settings' && (
             <Settings onAccountsChanged={refresh} onSync={syncNow} syncing={syncing} />
           )}

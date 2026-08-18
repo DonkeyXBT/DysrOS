@@ -1,4 +1,5 @@
 import { Accounts } from './Accounts.js'
+import { AycdPanel } from './AycdPanel.js'
 
 export function Settings({
   onAccountsChanged,
@@ -12,6 +13,8 @@ export function Settings({
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 13, maxWidth: 920 }}>
       <Accounts onChanged={onAccountsChanged} onSync={onSync} syncing={syncing} />
+
+      <AycdPanel />
 
       <section className="section" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="section-head" style={{ marginBottom: 0 }}>

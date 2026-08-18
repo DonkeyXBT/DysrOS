@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { api, type CancellationView, type PurchaseView } from '../api.js'
+import { api, type PurchaseView } from '../api.js'
+import { Pager, usePaged } from '../Pager.js'
 
-const COLUMNS = '110px 130px 96px minmax(170px,1fr) 46px 88px 88px 94px 118px 110px'
+const COLUMNS = '62px 104px 126px 92px minmax(170px,1fr) 44px 86px 86px 92px 116px 112px'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'oklch(0.68 0.02 265)',
@@ -24,85 +25,70 @@ const STATUS_LABEL: Record<string, string> = {
 }
 
 export function Purchases({ query }: { query: string }) {
-  const [purchases, setPurchases] = useState<PurchaseView[] | null>(null)
-  const [cancellations, setCancellations] = useState<CancellationView[]>([])
+  const [rows, setRows] = useState<PurchaseView[] | null>(null)
+  const [kindFilter, setKindFilter] = useState<'all' | 'buy' | 'cancel'>('all')
 
   useEffect(() => {
-    void api.purchases().then(setPurchases)
-    void api.cancellations().then(setCancellations)
+    void api.purchases().then(setRows)
   }, [])
 
-  if (!purchases) return <div className="empty"><span className="empty-body">Loading…</span></div>
-
+  const all = rows ?? []
   const term = query.trim().toLowerCase()
-  const rows = term
-    ? purchases.filter(
-        (p) =>
-          (p.title ?? '').toLowerCase().includes(term) ||
-          (p.reference ?? '').toLowerCase().includes(term) ||
-          p.retailer.toLowerCase().includes(term),
-      )
-    : purchases
+  const filtered = all
+    .filter((row) => kindFilter === 'all' || row.kind === kindFilter)
+    .filter((row) =>
+      !term
+      || (row.title ?? '').toLowerCase().includes(term)
+      || (row.reference ?? '').toLowerCase().includes(term)
+      || row.retailer.toLowerCase().includes(term))
 
-  if (purchases.length === 0 && cancellations.length === 0) {
+  // Hooks must run on every render, so paging is computed before the early
+  // returns below rather than after them.
+  const paged = usePaged(filtered, `${kindFilter}|${term}`)
+
+  if (!rows) return <div className="empty"><span className="empty-body">Loading…</span></div>
+
+  if (rows.length === 0) {
     return (
       <div className="empty" style={{ margin: '60px auto' }}>
         <div className="empty-title">No orders yet</div>
-        <div className="empty-body">Import an order confirmation and it appears here.</div>
+        <div className="empty-body">
+          Sync a mailbox and every order and cancellation in it appears here.
+        </div>
       </div>
     )
   }
 
+  const counts = {
+    all: rows.length,
+    buy: rows.filter((r) => r.kind === 'buy').length,
+    cancel: rows.filter((r) => r.kind === 'cancel').length,
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
-      {cancellations.length > 0 && (
-        <section className="section" style={{ padding: '14px 16px' }}>
-          <div className="section-head">
-            <h2>Cancellations</h2>
-            <span className="section-note">
-              bol.com states no amount in these, so a refund value has to come from the original order
-            </span>
-          </div>
-          {cancellations.map((cancellation) => (
-            <div
-              key={cancellation.id}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0',
-                borderTop: '1px solid var(--border-soft)', fontSize: 12.5,
-              }}
-            >
-              <span className="mono" style={{ color: 'var(--text-dim)', width: 110 }}>
-                {cancellation.reference ?? '—'}
-              </span>
-              <span style={{ flex: 1, color: 'var(--text-muted)' }}>
-                {cancellation.title ?? '—'}
-              </span>
-              {cancellation.refundExpected && (
-                <span
-                  className="chip"
-                  style={{
-                    color: 'oklch(0.74 0.10 60)',
-                    background: 'color-mix(in oklab, oklch(0.74 0.10 60) 14%, transparent)',
-                    border: '1px solid color-mix(in oklab, oklch(0.74 0.10 60) 30%, transparent)',
-                  }}
-                >
-                  refund expected
-                </span>
-              )}
-              {!purchases.some((p) => p.reference === cancellation.reference) && (
-                <span style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
-                  no matching order imported
-                </span>
-              )}
-            </div>
-          ))}
-        </section>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+        {(['all', 'buy', 'cancel'] as const).map((kind) => (
+          <button
+            key={kind}
+            className="btn"
+            onClick={() => setKindFilter(kind)}
+            style={
+              kindFilter === kind
+                ? { background: '#242c3e', color: 'var(--text)', borderColor: '#3a4a6a' }
+                : undefined
+            }
+          >
+            {kind === 'all' ? 'All' : kind === 'buy' ? 'Buys' : 'Cancels'}{' '}
+            <span className="mono" style={{ opacity: .6 }}>{counts[kind]}</span>
+          </button>
+        ))}
+      </div>
 
       <div className="table">
         <div className="table-scroll">
-          <div className="thead" style={{ minWidth: 990, gridTemplateColumns: COLUMNS }}>
-            <div>Retailer</div><div>Order ref</div><div>Ordered</div><div>Item</div>
+          <div className="thead" style={{ minWidth: 1050, gridTemplateColumns: COLUMNS }}>
+            <div>Type</div><div>Retailer</div><div>Order ref</div><div>Date</div><div>Item</div>
             <div style={{ textAlign: 'right' }}>Qty</div>
             <div style={{ textAlign: 'right' }}>Unit</div>
             <div style={{ textAlign: 'right' }}>Shipping</div>
@@ -110,59 +96,97 @@ export function Purchases({ query }: { query: string }) {
             <div>Status</div>
             <div>Checks</div>
           </div>
-          {rows.map((purchase) => (
-            <div
-              key={purchase.id}
-              className="trow"
-              style={{ minWidth: 990, gridTemplateColumns: COLUMNS }}
-            >
-              <div style={{ fontWeight: 600 }}>{purchase.retailer}</div>
-              <div className="cell-mono">{purchase.reference ?? '—'}</div>
-              <div className="cell-mono">{purchase.orderedAt.slice(0, 10)}</div>
+
+          {paged.visible.map((row) => {
+            const isCancel = row.kind === 'cancel'
+            const statusColor = STATUS_COLOR[row.status] ?? '#8d94a6'
+            return (
               <div
-                style={{
-                  fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap',
-                  overflow: 'hidden', textOverflow: 'ellipsis',
-                }}
+                key={row.id}
+                className="trow"
+                style={{ minWidth: 1050, gridTemplateColumns: COLUMNS }}
               >
-                {purchase.title ?? '—'}
-              </div>
-              <div className="cell-right">{purchase.quantity}</div>
-              <div className="cell-right" style={{ color: 'var(--text-muted)' }}>{purchase.unit}</div>
-              <div className="cell-right" style={{ color: 'var(--text-muted)' }}>{purchase.shipping}</div>
-              <div className="cell-right" style={{ fontSize: 12.5, fontWeight: 600 }}>
-                {purchase.total}
-              </div>
-              <div>
-                <span
-                  className="chip"
+                <div>
+                  <span
+                    className="chip"
+                    style={{
+                      color: isCancel ? 'var(--pink)' : 'var(--teal)',
+                      background: isCancel
+                        ? 'color-mix(in oklab, var(--pink) 14%, transparent)'
+                        : 'color-mix(in oklab, var(--teal) 14%, transparent)',
+                      border: `1px solid ${isCancel
+                        ? 'color-mix(in oklab, var(--pink) 32%, transparent)'
+                        : 'color-mix(in oklab, var(--teal) 32%, transparent)'}`,
+                      padding: '3px 9px',
+                    }}
+                  >
+                    {isCancel ? 'Cancel' : 'Buy'}
+                  </span>
+                </div>
+                <div style={{ fontWeight: 600 }}>{row.retailer}</div>
+                <div className="cell-mono">{row.reference ?? '—'}</div>
+                <div className="cell-mono">{row.orderedAt.slice(0, 10)}</div>
+                <div
                   style={{
-                    color: STATUS_COLOR[purchase.status] ?? 'var(--text-dim)',
-                    background: `color-mix(in oklab, ${STATUS_COLOR[purchase.status] ?? '#8d94a6'} 14%, transparent)`,
-                    border: `1px solid color-mix(in oklab, ${STATUS_COLOR[purchase.status] ?? '#8d94a6'} 30%, transparent)`,
+                    fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+                    overflow: 'hidden', textOverflow: 'ellipsis',
                   }}
                 >
-                  {STATUS_LABEL[purchase.status] ?? purchase.status}
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {purchase.totalsConsistent ? (
-                  <span style={{ fontSize: 11, color: 'var(--teal)' }}>totals check out</span>
-                ) : (
-                  <span style={{ fontSize: 11, color: 'var(--warm)' }}>totals disagree</span>
-                )}
-                {purchase.refundOutstanding && (
-                  <span className="mono" style={{ fontSize: 11, color: 'var(--pink)' }}>
-                    {purchase.refundOutstanding} refund due
+                  {row.title ?? '—'}
+                </div>
+                <div className="cell-right">{isCancel ? '—' : row.quantity}</div>
+                <div className="cell-right" style={{ color: 'var(--text-muted)' }}>{row.unit}</div>
+                <div className="cell-right" style={{ color: 'var(--text-muted)' }}>{row.shipping}</div>
+                <div className="cell-right" style={{ fontSize: 12.5, fontWeight: 600 }}>
+                  {row.total}
+                </div>
+                <div>
+                  <span
+                    className="chip"
+                    style={{
+                      color: statusColor,
+                      background: `color-mix(in oklab, ${statusColor} 14%, transparent)`,
+                      border: `1px solid color-mix(in oklab, ${statusColor} 30%, transparent)`,
+                    }}
+                  >
+                    {STATUS_LABEL[row.status] ?? row.status}
                   </span>
-                )}
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                  {isCancel ? (
+                    <span style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
+                      no matching order
+                    </span>
+                  ) : row.totalsConsistent ? (
+                    <span style={{ fontSize: 11, color: 'var(--teal)' }}>totals check out</span>
+                  ) : (
+                    <span style={{ fontSize: 11, color: 'var(--warm)' }}>totals disagree</span>
+                  )}
+                  {row.refundOutstanding && (
+                    <span className="mono" style={{ fontSize: 11, color: 'var(--pink)' }}>
+                      {row.refundOutstanding} refund due
+                    </span>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       </div>
+
+      <Pager
+        page={paged.page}
+        pageCount={paged.pageCount}
+        from={paged.from}
+        to={paged.to}
+        total={paged.total}
+        noun="rows"
+        onPage={paged.setPage}
+      />
+
       <div style={{ fontSize: 11, color: 'var(--text-ghost)', paddingLeft: 4 }}>
-        "totals check out" means quantity x unit + shipping equalled the total the retailer stated
+        A Cancel row is a cancellation whose original order has not been seen yet; once it
+        arrives, the two merge into one Buy row marked cancelled.
       </div>
     </div>
   )

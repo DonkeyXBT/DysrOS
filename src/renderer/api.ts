@@ -7,7 +7,7 @@ export interface ShipmentView {
   linkedToPurchase: boolean
 }
 export interface PurchaseView {
-  id: string; retailer: string; reference: string | null; orderedAt: string
+  id: string; kind: 'buy' | 'cancel'; retailer: string; reference: string | null; orderedAt: string
   title: string | null; quantity: number; unit: string; shipping: string
   total: string; totalMinor: number; totalsConsistent: boolean; status: string
   refundOutstanding: string | null
@@ -35,6 +35,29 @@ export interface NewAccountInput {
   label: string; email: string; provider: string
   host: string; port: number; useTls: boolean
   username: string; password: string
+}
+
+export interface LogEntryView {
+  at: string
+  level: 'error' | 'warn' | 'info'
+  source: string
+  message: string
+  detail: string | null
+}
+
+export interface AycdStatusView {
+  configured: boolean
+  running: boolean
+  addresses: string[]
+  templates: number
+  activeTasks: number
+  registered: number
+  succeeded: number
+  timedOut: number
+  errored: number
+  events: number
+  lastPollAt: string | null
+  lastError: string | null
 }
 
 export interface SummaryView {
@@ -73,6 +96,20 @@ interface Api {
     failures: { email: string; error: string }[]
   }>
   encryptionAvailable(): Promise<boolean>
+  logEntries(): Promise<LogEntryView[]>
+  logPath(): Promise<string>
+  logClear(): Promise<boolean>
+  logOpenFolder(): Promise<void>
+  crashReportUrl(index: number): Promise<{ url: string; signature: string; title: string } | null>
+  reportRendererError(message: string, detail: string): Promise<LogEntryView>
+  onCrash(handler: (entry: LogEntryView) => void): () => void
+  aycdStatus(): Promise<AycdStatusView>
+  aycdSetKey(key: string): Promise<void>
+  aycdClearKey(): Promise<void>
+  aycdSetAddresses(addresses: string[]): Promise<string[]>
+  aycdVerify(): Promise<{ ok: boolean; message: string }>
+  aycdStart(): Promise<{ started: boolean; message: string }>
+  aycdStop(): Promise<{ stopped: boolean }>
   downloadUpdate(): Promise<{ started: boolean }>
   installUpdate(): Promise<void>
   onUpdateProgress(handler: (p: { percent: number; bytesPerSecond: number }) => void): () => void
