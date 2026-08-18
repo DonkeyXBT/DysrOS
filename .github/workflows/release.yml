@@ -43,6 +43,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Tags carry the release note, so the checkout needs them.
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -77,8 +80,13 @@ jobs:
       - name: Create the release up front
         shell: bash
         run: |
+          # The release note is the tag's own subject line, kept to a short
+          # phrase. Anything longer belongs in the commit history, not here.
+          NOTE=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")
+          if [ -z "$NOTE" ]; then NOTE="General improvements"; fi
+
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME"               --title "${GITHUB_REF_NAME#v}"               --notes "Installer is attached below. Windows SmartScreen will warn on first run: the build is not code-signed."               --verify-tag
+            gh release create "$GITHUB_REF_NAME"               --title "${GITHUB_REF_NAME#v}"               --notes "$NOTE"               --verify-tag
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
