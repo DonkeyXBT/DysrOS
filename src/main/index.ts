@@ -14,13 +14,55 @@ let mainWindow: BrowserWindow | null = null
 let mailDir = ''
 let rescanTimer: NodeJS.Timeout | null = null
 let hourlyTimer: NodeJS.Timeout | null = null
+let trackingTimer: NodeJS.Timeout | null = null
+let trackingInFlight = false
 /** Guards against a scheduled sync starting on top of one already running. */
 let syncInFlight = false
 
 const HOURLY_SYNC_MS = 60 * 60 * 1000
+/**
+ * Tracking codes are chased on their own schedule as well as after a sync.
+ * A backlog of parcels cannot clear itself otherwise: a sync only resolves a
+ * batch, and waiting an hour for the next one to take the following batch
+ * leaves parcels without codes for no good reason.
+ */
+const TRACKING_SWEEP_MS = 10 * 60 * 1000
 /** How often a running sync pushes its results to the screens. Often enough to
  *  feel live, rarely enough not to re-query the database for every message. */
 const LIVE_REFRESH_EVERY = 20
+
+/**
+ * Follows retailer redirects to turn them into carrier barcodes.
+ *
+ * Runs on a timer as well as after each sync, so a parcel that could not be
+ * resolved — the carrier had not registered it yet, the network was down — is
+ * picked up shortly afterwards without anyone asking.
+ */
+async function sweepTracking(reason: string): Promise<void> {
+  if (trackingInFlight) return
+  trackingInFlight = true
+  try {
+    const result = await service.resolveTrackingCodes({
+      limit: 60,
+      onProgress: (done, total) => {
+        mainWindow?.webContents.send('sync-progress', {
+          account: 'tracking',
+          done,
+          stored: total,
+          subject: `Getting tracking codes (${done} of ${total})`,
+        })
+      },
+    })
+    if (result.attempted > 0) {
+      log.record('info', 'tracking', `${reason}: resolved ${result.resolved} of ${result.attempted}`)
+      mainWindow?.webContents.send('mail-updated', { tracking: result })
+    }
+  } catch (error) {
+    log.record('warn', 'tracking', error)
+  } finally {
+    trackingInFlight = false
+  }
+}
 
 /**
  * Runs a sync, reporting progress per message and pushing partial results to
@@ -57,26 +99,8 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
     mainWindow?.webContents.send('mail-updated', result)
 
     // Barcodes are only reachable by following the retailer's redirect, so the
-    // lookup happens here rather than during parsing. Failures are logged and
-    // retried on the next pass; they never fail the sync.
-    try {
-      const tracking = await service.resolveTrackingCodes({
-        onProgress: (done, total) => {
-          mainWindow?.webContents.send('sync-progress', {
-            account: 'tracking',
-            done,
-            stored: total,
-            subject: `Resolving tracking codes (${done} of ${total})`,
-          })
-        },
-      })
-      if (tracking.attempted > 0) {
-        log.record('info', 'tracking', `resolved ${tracking.resolved} of ${tracking.attempted}`)
-        mainWindow?.webContents.send('mail-updated', { tracking })
-      }
-    } catch (error) {
-      log.record('warn', 'tracking', error)
-    }
+    // lookup happens here rather than during parsing.
+    await sweepTracking('after sync')
 
     return result
   } catch (error) {
@@ -439,6 +463,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('summary', () => service.summary())
   ipcMain.handle('shipments', () => service.listShipments())
+  ipcMain.handle('inventory', () => service.listInventory())
   ipcMain.handle('purchases', () => service.listPurchases())
   ipcMain.handle('cancellations', () => service.listCancellations())
   ipcMain.handle('review', () => service.listReviewQueue())
@@ -489,6 +514,14 @@ app.whenReady().then(() => {
     })
   }, HOURLY_SYNC_MS)
 
+  trackingTimer = setInterval(() => {
+    void sweepTracking('scheduled sweep')
+  }, TRACKING_SWEEP_MS)
+
+  // Anything left unresolved from a previous run is picked up on launch rather
+  // than waiting for the first timer to fire.
+  setTimeout(() => void sweepTracking('startup'), 8000)
+
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -497,6 +530,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   if (hourlyTimer) clearInterval(hourlyTimer)
+  if (trackingTimer) clearInterval(trackingTimer)
   // The watcher owns a repeating timer; leaving it running holds the process open.
   void service?.stopAycdWatch()
 })

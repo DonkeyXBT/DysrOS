@@ -3,7 +3,7 @@ import { api, type PurchaseView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
 import { SkeletonTable } from '../Skeleton.js'
 
-const COLUMNS = '62px 104px 126px 92px minmax(170px,1fr) 44px 86px 86px 92px 116px 112px'
+const COLUMNS = '62px 96px 118px 88px minmax(150px,1fr) 40px 82px 82px 88px 110px 128px'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'oklch(0.68 0.02 265)',
@@ -95,7 +95,7 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
             <div style={{ textAlign: 'right' }}>Shipping</div>
             <div style={{ textAlign: 'right' }}>Total</div>
             <div>Status</div>
-            <div>Checks</div>
+            <div>Parcel</div>
           </div>
 
           {paged.visible.map((row) => {

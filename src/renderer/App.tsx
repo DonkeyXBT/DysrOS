@@ -5,6 +5,7 @@ import { Shipments } from './screens/Shipments.js'
 import { Purchases } from './screens/Purchases.js'
 import { Review } from './screens/Review.js'
 import { Settings } from './screens/Settings.js'
+import { Inventory } from './screens/Inventory.js'
 import { Placeholder } from './screens/Placeholder.js'
 import { Logs } from './screens/Logs.js'
 import { TitleBar } from './TitleBar.js'
@@ -262,6 +263,7 @@ export function App() {
           {/* Keyed by screen so moving to another screen clears a failed one. */}
           <ErrorBoundary area={screen} key={screen} onReset={() => void refresh()}>
           {screen === 'Dashboard' && <Dashboard summary={summary} onSync={syncNow} />}
+          {screen === 'Inventory' && <Inventory query={query} dataVersion={dataVersion} />}
           {screen === 'Shipments' && <Shipments query={query} dataVersion={dataVersion} />}
           {screen === 'Purchases' && <Purchases query={query} dataVersion={dataVersion} />}
           {screen === 'Review' && <Review dataVersion={dataVersion} />}
@@ -282,7 +284,7 @@ export function App() {
               reviewCount={summary?.reviewCount ?? 0}
             />
           )}
-          {(screen === 'Inventory' || screen === 'Sales' || screen === 'Reports') && (
+          {(screen === 'Sales' || screen === 'Reports') && (
             <Placeholder screen={screen} />
           )}
           </ErrorBoundary>
