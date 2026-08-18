@@ -9,7 +9,13 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "outDir": "dist",
-    "types": ["node"]
+    "types": [
+      "node"
+    ],
+    "jsx": "react-jsx"
   },
-  "include": ["src/**/*.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx"
+  ]
 }

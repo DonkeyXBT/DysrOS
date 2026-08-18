@@ -7,6 +7,7 @@ import { Review } from './screens/Review.js'
 import { Settings } from './screens/Settings.js'
 import { Placeholder } from './screens/Placeholder.js'
 import { TitleBar } from './TitleBar.js'
+import { ErrorBoundary } from './ErrorBoundary.js'
 import { Updater } from './Updater.js'
 
 /** Nav order and per-item hue, both taken from the mockup. */
@@ -29,7 +30,7 @@ const SUBTITLES: Record<string, string> = {
   Shipments: 'Track and trace, both directions',
   Review: 'Emails no parser recognised',
   Reports: 'P&L, VAT and currency exposure',
-  Settings: 'Accounts, notifications, parsers',
+  Settings: 'Mailboxes and integrations',
 }
 
 export type Screen = (typeof NAV)[number]['label']
@@ -174,18 +175,19 @@ export function App() {
         )}
 
         <div className="content">
+          {/* Keyed by screen so moving to another screen clears a failed one. */}
+          <ErrorBoundary area={screen} key={screen} onReset={() => void refresh()}>
           {screen === 'Dashboard' && <Dashboard summary={summary} onSync={syncNow} />}
           {screen === 'Shipments' && <Shipments query={query} />}
           {screen === 'Purchases' && <Purchases query={query} />}
           {screen === 'Review' && <Review />}
-          {screen === 'Settings' && <Settings
-              mailDir={mailDir}
-              onMailDirChange={setMailDir}
-              onAccountsChanged={refresh}
-            />}
+          {screen === 'Settings' && (
+            <Settings onAccountsChanged={refresh} onSync={syncNow} syncing={syncing} />
+          )}
           {(screen === 'Inventory' || screen === 'Sales' || screen === 'Reports') && (
             <Placeholder screen={screen} />
           )}
+          </ErrorBoundary>
         </div>
         </main>
       </div>
