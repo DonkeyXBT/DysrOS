@@ -357,6 +357,42 @@ app.whenReady().then(() => {
     return { deleted: true, ...before }
   })
 
+  handle('export-message', async (id: string, format: 'eml' | 'html') => {
+    const file = await service.exportMessage(id, format)
+    if (!file) {
+      return { saved: false, reason: 'No copy of this message was kept. Sync again to collect it.' }
+    }
+    const picked = await dialog.showSaveDialog({
+      title: 'Save message',
+      defaultPath: file.name,
+      filters: [{ name: format.toUpperCase(), extensions: [format] }],
+    })
+    if (picked.canceled || !picked.filePath) return { saved: false }
+    writeFileSync(picked.filePath, file.content)
+    return { saved: true, path: picked.filePath }
+  })
+
+  handle('export-all-unrecognised', async () => {
+    const ids = service.exportableReviewIds()
+    if (ids.length === 0) {
+      return { saved: 0, reason: 'Nothing in the queue has a stored copy to export.' }
+    }
+    const picked = await dialog.showOpenDialog({
+      title: 'Choose a folder for the unrecognised mail',
+      properties: ['openDirectory', 'createDirectory'],
+    })
+    if (picked.canceled || !picked.filePaths[0]) return { saved: 0 }
+
+    let saved = 0
+    for (const id of ids) {
+      const file = await service.exportMessage(id, 'eml')
+      if (!file) continue
+      writeFileSync(join(picked.filePaths[0], file.name), file.content)
+      saved += 1
+    }
+    return { saved, folder: picked.filePaths[0] }
+  })
+
   handle('discord-settings', () => service.discordSettings())
   handle('discord-set-webhook', (url: string) => service.setDiscordWebhook(url))
   handle('discord-set-rule', (event: string, enabled: boolean) => {

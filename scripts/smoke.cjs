@@ -14,7 +14,7 @@ const path = require('node:path')
 
 const SCREENS = [
   'Dashboard', 'Inventory', 'Purchases', 'Sales',
-  'Shipments', 'Review', 'Reports', 'Settings',
+  'Shipments', 'Reports', 'Settings',
 ]
 
 const failures = []

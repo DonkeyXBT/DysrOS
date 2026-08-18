@@ -10,11 +10,15 @@ export function Settings({
   onSync,
   syncing,
   onOpenLogs,
+  onOpenReview,
+  reviewCount,
 }: {
   onAccountsChanged: () => void
   onSync: () => void
   syncing: boolean
   onOpenLogs: () => void
+  onOpenReview: () => void
+  reviewCount: number
 }) {
   const [reparsing, setReparsing] = useState(false)
   const [reparseNote, setReparseNote] = useState<string | null>(null)
@@ -62,6 +66,22 @@ export function Settings({
       <AycdPanel />
 
       <DiscordPanel />
+
+      <section className="section" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div className="section-head" style={{ marginBottom: 0 }}>
+          <h2>Unrecognised mail</h2>
+          <span className="section-note">
+            {reviewCount === 0 ? 'nothing waiting' : `${reviewCount} waiting`}
+          </span>
+          <button className="btn" style={{ marginLeft: 'auto' }} onClick={onOpenReview}>
+            Open review queue
+          </button>
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
+          Mail no parser recognised is kept here rather than dropped. Exporting one as .eml is
+          what allows a parser to be written for it, so the same mail is understood next time.
+        </div>
+      </section>
 
       <section className="section" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="section-head" style={{ marginBottom: 0 }}>
