@@ -52,7 +52,7 @@ describe.skipIf(!allPresent)('AppService importing real mail', () => {
 
   it('builds purchases whose totals all reconcile', async () => {
     await importAll()
-    const purchases = service.listPurchases()
+    const purchases = service.listPurchases().filter((p) => p.kind === 'buy')
     expect(purchases).toHaveLength(2)
     expect(purchases.every((purchase) => purchase.totalsConsistent)).toBe(true)
     expect(purchases.map((p) => p.reference).sort()).toEqual(['C0008N401L', 'C000CXJLHK'])
@@ -371,7 +371,7 @@ describe.skipIf(!allPresent)('screens read reconciled state, not raw events', ()
     await importAll()
     // Previously hardcoded: every order read as "confirmed" no matter what had
     // happened to it since.
-    const statuses = service.listPurchases().map((p) => p.status)
+    const statuses = service.listPurchases().filter((p) => p.kind === 'buy').map((p) => p.status)
     expect(statuses.every((s) => typeof s === 'string' && s.length > 0)).toBe(true)
     expect(statuses).toEqual(['confirmed', 'confirmed'])
   })
@@ -412,6 +412,50 @@ describe.skipIf(!allPresent)('screens read reconciled state, not raw events', ()
 
   it('surfaces the totals check from the purchase row', async () => {
     await importAll()
-    expect(service.listPurchases().every((p) => p.totalsConsistent)).toBe(true)
+    expect(service.listPurchases().filter((p) => p.kind === 'buy')
+      .every((p) => p.totalsConsistent)).toBe(true)
+  })
+})
+
+describe.skipIf(!allPresent)('one list of orders, labelled buy or cancel', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('labels real orders as buys', async () => {
+    await importAll()
+    const buys = service.listPurchases().filter((row) => row.kind === 'buy')
+    expect(buys).toHaveLength(2)
+    expect(buys.map((b) => b.reference).sort()).toEqual(['C0008N401L', 'C000CXJLHK'])
+  })
+
+  it('includes a cancellation with no matching order as its own row', async () => {
+    await importAll()
+    const cancels = service.listPurchases().filter((row) => row.kind === 'cancel')
+    expect(cancels).toHaveLength(1)
+    expect(cancels[0]!.reference).toBe('C000CXJH1J')
+    expect(cancels[0]!.status).toBe('cancelled')
+  })
+
+  it('leaves money columns empty on a cancellation rather than showing zero', async () => {
+    await importAll()
+    const cancel = service.listPurchases().find((row) => row.kind === 'cancel')!
+    // bol.com states no amount in a cancellation; €0.00 would be a claim, not a fact.
+    expect(cancel.total).toBe('—')
+    expect(cancel.unit).toBe('—')
+  })
+
+  it('returns everything on one list, newest first', async () => {
+    await importAll()
+    const rows = service.listPurchases()
+    expect(rows).toHaveLength(3)
+    const dates = rows.map((r) => r.orderedAt)
+    expect([...dates].sort().reverse()).toEqual(dates)
+  })
+
+  it('does not duplicate a cancellation that already has an order', async () => {
+    await importAll()
+    const refs = service.listPurchases().map((r) => `${r.retailer}|${r.reference}`)
+    expect(new Set(refs).size).toBe(refs.length)
   })
 })

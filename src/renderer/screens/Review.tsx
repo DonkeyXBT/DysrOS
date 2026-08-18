@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type ReviewView } from '../api.js'
+import { Pager, usePaged } from '../Pager.js'
 
 export function Review() {
   const [items, setItems] = useState<ReviewView[] | null>(null)
@@ -7,6 +8,8 @@ export function Review() {
   useEffect(() => {
     void api.review().then(setItems)
   }, [])
+
+  const paged = usePaged(items ?? [], 'review')
 
   if (!items) return <div className="empty"><span className="empty-body">Loading…</span></div>
 
@@ -32,7 +35,7 @@ export function Review() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 960 }}>
-      {items.map((message) => (
+      {paged.visible.map((message) => (
         <div
           key={message.id}
           className="section"
@@ -62,6 +65,15 @@ export function Review() {
           </div>
         </div>
       ))}
+      <Pager
+        page={paged.page}
+        pageCount={paged.pageCount}
+        from={paged.from}
+        to={paged.to}
+        total={paged.total}
+        noun="emails"
+        onPage={paged.setPage}
+      />
     </div>
   )
 }

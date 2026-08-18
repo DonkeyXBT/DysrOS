@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type ShipmentView } from '../api.js'
+import { Pager, usePaged } from '../Pager.js'
 
 const GRID = 'grid-template-columns:70px 110px 170px minmax(160px,1fr) 130px 100px 96px'
 
@@ -38,17 +39,19 @@ export function Shipments({ query }: { query: string }) {
     void api.shipments().then(setShipments)
   }, [])
 
-  if (!shipments) return <div className="empty"><span className="empty-body">Loading…</span></div>
-
   const term = query.trim().toLowerCase()
-  const rows = term
-    ? shipments.filter(
-        (s) =>
-          (s.title ?? '').toLowerCase().includes(term) ||
-          s.linked.toLowerCase().includes(term) ||
-          (s.trackingNumber ?? '').toLowerCase().includes(term),
-      )
-    : shipments
+  const rows = (shipments ?? []).filter(
+    (s) =>
+      !term
+      || (s.title ?? '').toLowerCase().includes(term)
+      || s.linked.toLowerCase().includes(term)
+      || (s.trackingNumber ?? '').toLowerCase().includes(term),
+  )
+
+  // Computed before the early returns: hooks must run on every render.
+  const paged = usePaged(rows, term)
+
+  if (!shipments) return <div className="empty"><span className="empty-body">Loading…</span></div>
 
   const redirectable = shipments.filter((s) => s.dhlRedirectable)
 
@@ -101,7 +104,7 @@ export function Shipments({ query }: { query: string }) {
               <div>Dir</div><div>Carrier</div><div>Tracking</div><div>Contents</div>
               <div>Status</div><div>Expected</div><div>Postcode</div>
             </div>
-            {rows.map((shipment) => {
+            {paged.visible.map((shipment) => {
               const mark = CARRIER_MARK[shipment.carrier] ?? { abbr: '??', color: '#8d94a6' }
               return (
                 <div
@@ -177,8 +180,17 @@ export function Shipments({ query }: { query: string }) {
             })}
           </div>
         </div>
+        <Pager
+          page={paged.page}
+          pageCount={paged.pageCount}
+          from={paged.from}
+          to={paged.to}
+          total={paged.total}
+          noun="shipments"
+          onPage={paged.setPage}
+        />
         <div style={{ fontSize: 11, color: 'var(--text-ghost)', paddingLeft: 4 }}>
-          {rows.length} of {shipments.length} shipments · click a row for detail
+          Click a row for detail
         </div>
       </div>
 

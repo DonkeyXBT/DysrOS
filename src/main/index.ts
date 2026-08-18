@@ -3,8 +3,13 @@ import { join } from 'node:path'
 import { writeFileSync, watch, existsSync, mkdirSync } from 'node:fs'
 import { autoUpdater } from 'electron-updater'
 import { AppService } from './service.js'
+import { ErrorLog, defaultLogPath } from '../core/log.js'
+import { buildCrashReport, issueUrl } from '../core/crash-report.js'
+
+const REPO = 'DonkeyXBT/DysrOS'
 
 let service: AppService
+let log: ErrorLog
 let mainWindow: BrowserWindow | null = null
 let mailDir = ''
 let rescanTimer: NodeJS.Timeout | null = null
@@ -79,7 +84,36 @@ function createWindow(): void {
   }
 }
 
+/**
+ * Wraps every IPC handler so a throw is recorded rather than only surfacing as
+ * a rejected promise in the renderer, where it is easy to miss entirely.
+ */
+function handle(channel: string, fn: (...args: never[]) => unknown): void {
+  ipcMain.handle(channel, async (_event, ...args) => {
+    try {
+      return await (fn as (...a: unknown[]) => unknown)(...args)
+    } catch (error) {
+      const entry = log.record('error', `ipc:${channel}`, error)
+      mainWindow?.webContents.send('crash', entry)
+      throw error
+    }
+  })
+}
+
 app.whenReady().then(() => {
+  log = new ErrorLog(defaultLogPath(app.getPath('userData')))
+
+  // A crash during a sync used to leave nothing behind. These land in the log
+  // file synchronously, so the record survives the process dying.
+  process.on('uncaughtException', (error) => {
+    const entry = log.record('error', 'main:uncaught', error)
+    mainWindow?.webContents.send('crash', entry)
+  })
+  process.on('unhandledRejection', (reason) => {
+    const entry = log.record('error', 'main:unhandled-rejection', reason)
+    mainWindow?.webContents.send('crash', entry)
+  })
+  log.record('info', 'app', `started ${app.getVersion()}`)
   /**
    * Passwords are encrypted with the OS keystore (DPAPI on Windows), so a copy
    * of the database file is useless on another machine or account. Where the OS
@@ -210,11 +244,57 @@ app.whenReady().then(() => {
   ipcMain.handle('remove-account', (_e, id: string) => service.removeAccount(id))
   ipcMain.handle('test-account', (_e, connection) => service.testAccount(connection))
   ipcMain.handle('sync-accounts', async () => {
-    const result = await service.syncAccounts()
-    mainWindow?.webContents.send('mail-updated', result)
-    return result
+    log.record('info', 'sync', 'sync started')
+    try {
+      const result = await service.syncAccounts()
+      for (const failure of result.failures) {
+        log.record('warn', 'sync', new Error(failure.error), `account: ${failure.email}`)
+      }
+      log.record('info', 'sync', `sync finished: ${result.fetched} fetched, ${result.stored} new`)
+      mainWindow?.webContents.send('mail-updated', result)
+      return result
+    } catch (error) {
+      const entry = log.record('error', 'sync', error)
+      mainWindow?.webContents.send('crash', entry)
+      throw error
+    }
   })
   ipcMain.handle('encryption-available', () => safeStorage.isEncryptionAvailable())
+
+  handle('log-entries', () => log.recent(200))
+  handle('log-path', () => log.path())
+  handle('log-clear', () => {
+    log.clear()
+    return true
+  })
+  handle('log-open-folder', () => shell.showItemInFolder(log.path()))
+  handle('crash-report-url', (entryIndex: number) => {
+    const entry = log.recent(200)[entryIndex]
+    if (!entry) return null
+    const report = buildCrashReport(entry, {
+      appVersion: app.getVersion(),
+      electronVersion: process.versions.electron,
+      platform: process.platform,
+      arch: process.arch,
+    }, log.recent(200))
+    return { url: issueUrl(REPO, report), signature: report.signature, title: report.title }
+  })
+
+  ipcMain.handle('aycd-status', () => service.aycdStatus())
+  ipcMain.handle('aycd-set-key', (_e, key: string) => service.setAycdApiKey(key))
+  ipcMain.handle('aycd-clear-key', () => service.clearAycdApiKey())
+  ipcMain.handle('aycd-set-addresses', (_e, addresses: string[]) =>
+    service.setAycdAddresses(addresses))
+  ipcMain.handle('aycd-verify', () => service.verifyAycd())
+  ipcMain.handle('aycd-start', () => {
+    const result = service.startAycdWatch()
+    if (result.started) mainWindow?.webContents.send('mail-updated', {})
+    return result
+  })
+  ipcMain.handle('aycd-stop', async () => {
+    await service.stopAycdWatch()
+    return { stopped: true }
+  })
 
   ipcMain.handle('mail-dir', () => mailDir)
   ipcMain.handle('rescan', async () => service.scanMailDir(mailDir))
@@ -266,6 +346,11 @@ app.whenReady().then(() => {
     return { written: true, path: picked.filePath, rows: csv.split('\n').length - 1 }
   })
 
+  handle('report-renderer-error', (message: string, detail: string) => {
+    const entry = log.record('error', 'renderer', new Error(message), detail)
+    return entry
+  })
+
   ipcMain.handle('open-external', (_event, url: string) => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url)
   })
@@ -274,6 +359,11 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })
+})
+
+app.on('before-quit', () => {
+  // The watcher owns a repeating timer; leaving it running holds the process open.
+  void service?.stopAycdWatch()
 })
 
 app.on('window-all-closed', () => {
