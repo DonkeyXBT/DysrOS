@@ -65,6 +65,11 @@ jobs:
           fi
           echo "Releasing version $PKG"
 
+      # 0.0.1 shipped a build whose Settings screen threw on render, blanking
+      # the window. Refuse to package a build that cannot draw its own screens.
+      - name: Smoke test every screen
+        run: npm run smoke
+
       # electron-builder uploads assets in parallel, and if the release does not
       # exist yet each upload races to create it — which produced two releases
       # for the same tag, one holding the installer and the other the blockmap.

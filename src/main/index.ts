@@ -125,7 +125,16 @@ app.whenReady().then(() => {
     maximized: mainWindow?.isMaximized() ?? false,
     fullScreen: mainWindow?.isFullScreen() ?? false,
   }))
-  ipcMain.handle('app-version', () => app.getVersion())
+  // app.getVersion() reports Electron's own version when running from source,
+  // which is misleading in the title bar. package.json is the real answer.
+  ipcMain.handle('app-version', () => {
+    if (app.isPackaged) return app.getVersion()
+    try {
+      return require(join(app.getAppPath(), 'package.json')).version as string
+    } catch {
+      return app.getVersion()
+    }
+  })
 
   /**
    * Updates come from GitHub Releases, which is also where the installer is
