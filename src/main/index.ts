@@ -13,6 +13,57 @@ let log: ErrorLog
 let mainWindow: BrowserWindow | null = null
 let mailDir = ''
 let rescanTimer: NodeJS.Timeout | null = null
+let hourlyTimer: NodeJS.Timeout | null = null
+/** Guards against a scheduled sync starting on top of one already running. */
+let syncInFlight = false
+
+const HOURLY_SYNC_MS = 60 * 60 * 1000
+/** How often a running sync pushes its results to the screens. Often enough to
+ *  feel live, rarely enough not to re-query the database for every message. */
+const LIVE_REFRESH_EVERY = 20
+
+/**
+ * Runs a sync, reporting progress per message and pushing partial results to
+ * the interface as they land.
+ *
+ * Everything the sync produces is written before it finishes, so showing it as
+ * it arrives is just a matter of telling the screens to re-read — which is what
+ * removes any need to restart the application to see new mail.
+ */
+async function runSync(reason: 'manual' | 'scheduled'): Promise<{
+  accounts: number
+  fetched: number
+  stored: number
+  failures: { email: string; error: string }[]
+  skipped?: boolean
+}> {
+  if (syncInFlight) {
+    return { accounts: 0, fetched: 0, stored: 0, failures: [], skipped: true }
+  }
+  syncInFlight = true
+  log.record('info', 'sync', `${reason} sync started`)
+
+  try {
+    const result = await service.syncAccounts(undefined, (progress) => {
+      mainWindow?.webContents.send('sync-progress', progress)
+      if (progress.done % LIVE_REFRESH_EVERY === 0) {
+        mainWindow?.webContents.send('mail-updated', { partial: true })
+      }
+    })
+    for (const failure of result.failures) {
+      log.record('warn', 'sync', new Error(failure.error), `account: ${failure.email}`)
+    }
+    log.record('info', 'sync', `${reason} sync finished: ${result.fetched} fetched, ${result.stored} new`)
+    mainWindow?.webContents.send('mail-updated', result)
+    return result
+  } catch (error) {
+    const entry = log.record('error', 'sync', error)
+    mainWindow?.webContents.send('crash', entry)
+    throw error
+  } finally {
+    syncInFlight = false
+  }
+}
 
 /**
  * Re-scans the mail folder, coalescing bursts: a file copied in arrives as
@@ -244,24 +295,8 @@ app.whenReady().then(() => {
   ipcMain.handle('add-account', (_e, account) => service.addAccount(account))
   ipcMain.handle('remove-account', (_e, id: string) => service.removeAccount(id))
   ipcMain.handle('test-account', (_e, connection) => service.testAccount(connection))
-  ipcMain.handle('sync-accounts', async () => {
-    log.record('info', 'sync', 'sync started')
-    try {
-      const result = await service.syncAccounts(undefined, (progress) => {
-        mainWindow?.webContents.send('sync-progress', progress)
-      })
-      for (const failure of result.failures) {
-        log.record('warn', 'sync', new Error(failure.error), `account: ${failure.email}`)
-      }
-      log.record('info', 'sync', `sync finished: ${result.fetched} fetched, ${result.stored} new`)
-      mainWindow?.webContents.send('mail-updated', result)
-      return result
-    } catch (error) {
-      const entry = log.record('error', 'sync', error)
-      mainWindow?.webContents.send('crash', entry)
-      throw error
-    }
-  })
+  ipcMain.handle('sync-accounts', () => runSync('manual'))
+
   ipcMain.handle('encryption-available', () => safeStorage.isEncryptionAvailable())
 
   handle('log-entries', () => log.recent(200))
@@ -380,6 +415,14 @@ app.whenReady().then(() => {
     if (/^https:\/\//.test(url)) void shell.openExternal(url)
   })
 
+  // Catch up on anything that arrived while the application was closed, then
+  // keep checking. A missed email should never need a manual sync to notice.
+  hourlyTimer = setInterval(() => {
+    void runSync('scheduled').catch(() => {
+      // Already logged; a failed scheduled sync must not stop later ones.
+    })
+  }, HOURLY_SYNC_MS)
+
   createWindow()
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
@@ -387,6 +430,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
+  if (hourlyTimer) clearInterval(hourlyTimer)
   // The watcher owns a repeating timer; leaving it running holds the process open.
   void service?.stopAycdWatch()
 })

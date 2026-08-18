@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api.js'
+import { NotificationBell, type AppNotification } from './Notifications.js'
 
 /**
  * The application's own title bar, replacing the native frame.
@@ -12,9 +13,19 @@ import { api } from './api.js'
 export function TitleBar({
   screen,
   onOpenUpdater,
+  notifications,
+  unread,
+  notificationsOpen,
+  onToggleNotifications,
+  onCloseNotifications,
 }: {
   screen: string
   onOpenUpdater: () => void
+  notifications: AppNotification[]
+  unread: number
+  notificationsOpen: boolean
+  onToggleNotifications: () => void
+  onCloseNotifications: () => void
 }) {
   const [maximized, setMaximized] = useState(false)
   const [version, setVersion] = useState('')
@@ -31,6 +42,13 @@ export function TitleBar({
       <span className="titlebar-version mono">{version}</span>
       <div style={{ flex: 1 }} />
       <div className="titlebar-buttons">
+        <NotificationBell
+          notifications={notifications}
+          unread={unread}
+          open={notificationsOpen}
+          onToggle={onToggleNotifications}
+          onClose={onCloseNotifications}
+        />
         <button
           className="win-btn"
           title="Software update"

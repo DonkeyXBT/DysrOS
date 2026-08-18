@@ -25,13 +25,13 @@ const STATUS_LABEL: Record<string, string> = {
   partially_refunded: 'Part. refunded',
 }
 
-export function Purchases({ query }: { query: string }) {
+export function Purchases({ query, dataVersion }: { query: string; dataVersion: number }) {
   const [rows, setRows] = useState<PurchaseView[] | null>(null)
   const [kindFilter, setKindFilter] = useState<'all' | 'buy' | 'cancel'>('all')
 
   useEffect(() => {
     void api.purchases().then(setRows)
-  }, [])
+  }, [dataVersion])
 
   const all = rows ?? []
   const term = query.trim().toLowerCase()
