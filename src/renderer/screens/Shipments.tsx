@@ -86,7 +86,8 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
               {awaiting.length} parcel{awaiting.length === 1 ? '' : 's'} without a tracking code
             </span>
             <span style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>
-              the retailer sends a redirect, not the barcode — following it once gets the code
+              picked up automatically every few minutes — the retailer sends a redirect rather
+              than the barcode, and following it once gets the code
             </span>
             <button
               className="btn"
@@ -106,7 +107,7 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                 }
               }}
             >
-              {resolving ? 'Resolving…' : 'Get tracking codes'}
+              {resolving ? 'Resolving…' : 'Get them now'}
             </button>
           </div>
         )}
@@ -190,17 +191,28 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                       <span style={{ color: 'var(--text-ghost)' }}>not in the email</span>
                     )}
                   </div>
-                  <div
-                    style={{
-                      fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap',
-                      overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}
-                  >
-                    {shipment.quantity > 1 && (
-                      <span className="mono" style={{ color: 'var(--text-dimmer)' }}>
-                        {shipment.quantity}× </span>
-                    )}
-                    {shipment.title ?? shipment.linked}
+                  <div style={{ minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {shipment.quantity > 1 && (
+                        <span className="mono" style={{ color: 'var(--text-dimmer)' }}>
+                          {shipment.quantity}× </span>
+                      )}
+                      {shipment.title ?? '—'}
+                    </div>
+                    <div
+                      className="mono"
+                      style={{
+                        fontSize: 10,
+                        color: shipment.linkedToPurchase ? 'var(--teal)' : 'var(--text-ghost)',
+                      }}
+                    >
+                      {shipment.linkedToPurchase ? shipment.linked : `${shipment.linked} · no order yet`}
+                    </div>
                   </div>
                   <div>
                     <span

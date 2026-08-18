@@ -6,11 +6,22 @@ export interface ShipmentView {
   postalCode: string | null; city: string | null; dhlRedirectable: boolean
   linkedToPurchase: boolean
 }
+export interface ItemView {
+  id: string; title: string; brand: string | null; sku: string | null
+  size: string | null; condition: string; status: string
+  cost: string; costMinor: number
+  purchasedAt: string | null; daysHeld: number | null
+  location: string | null; retailer: string | null; orderRef: string | null
+  carrier?: string | null; trackingNumber?: string | null
+  shipmentStatus?: string | null; expectedDeliveryAt?: string | null
+}
+
 export interface PurchaseView {
   id: string; kind: 'buy' | 'cancel'; retailer: string; reference: string | null; orderedAt: string
   title: string | null; quantity: number; unit: string; shipping: string
   total: string; totalMinor: number; totalsConsistent: boolean; status: string
   refundOutstanding: string | null
+  carrier?: string | null; trackingNumber?: string | null; shipmentStatus?: string | null
 }
 export interface CancellationView {
   id: string; retailer: string; reference: string | null
@@ -83,6 +94,7 @@ export interface SummaryView {
 interface Api {
   summary(): Promise<SummaryView>
   shipments(): Promise<ShipmentView[]>
+  inventory(): Promise<ItemView[]>
   purchases(): Promise<PurchaseView[]>
   cancellations(): Promise<CancellationView[]>
   review(): Promise<ReviewView[]>

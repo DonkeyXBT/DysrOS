@@ -530,3 +530,43 @@ describe('filenames', () => {
     expect(safeFileName('///')).toBe('message')
   })
 })
+
+describe.skipIf(!allPresent)('shipments matched to orders', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('gives inventory a row per unit with its own cost', async () => {
+    await importAll()
+    const inventory = service.listInventory()
+    expect(inventory).toHaveLength(4)
+    expect(inventory.filter((i) => i.title.startsWith('LEGO'))).toHaveLength(3)
+  })
+
+  it('carries the parcel onto the item once the shipment is matched', async () => {
+    await importAll()
+    // These fixtures ship orders whose confirmations were not supplied, so no
+    // item should claim a parcel it has no evidence for.
+    const inventory = service.listInventory()
+    expect(inventory.every((item) => item.carrier === null)).toBe(true)
+  })
+
+  it('carries the parcel onto the purchase row as well', async () => {
+    await importAll()
+    const purchases = service.listPurchases().filter((p) => p.kind === 'buy')
+    expect(purchases.every((p) => 'carrier' in p)).toBe(true)
+  })
+
+  it('falls back to the order title when the shipping mail names nothing', async () => {
+    await importAll()
+    // Both directions exist so a parcel is never left anonymous when the order
+    // it belongs to knows what it contains.
+    const shipments = service.listShipments()
+    expect(shipments.every((s) => s.title !== null)).toBe(true)
+  })
+
+  it('says plainly when a parcel has no order to attach to', async () => {
+    await importAll()
+    expect(service.listShipments().every((s) => s.linkedToPurchase === false)).toBe(true)
+  })
+})

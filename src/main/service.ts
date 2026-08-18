@@ -319,9 +319,12 @@ export class AppService {
    */
   listShipments(): ShipmentView[] {
     const rows = this.db.prepare(
-      `SELECT s.*, e.payload_json, e.retailer, e.external_order_id
+      `SELECT s.*, e.payload_json, e.retailer, e.external_order_id,
+              p.title AS purchase_title,
+              (SELECT COUNT(*) FROM items i WHERE i.purchase_id = s.purchase_id) AS item_count
        FROM shipments s
        LEFT JOIN events e ON e.id = s.id
+       LEFT JOIN purchases p ON p.id = s.purchase_id
        ORDER BY s.created_at DESC`,
     ).all() as Record<string, unknown>[]
 
@@ -337,8 +340,10 @@ export class AppService {
         trackingNumber: (row.tracking_number as string | null) ?? null,
         trackingUrl: (row.tracking_url as string | null) ?? null,
         linked: `${(row.retailer as string) ?? 'unknown'} \u00b7 ${reference ?? '\u2014'}`,
-        title: (payload.title as string | null) ?? null,
-        quantity: (payload.quantity as number) ?? 1,
+        // The shipping mail names the contents; where it did not, the linked
+        // order does, which is the point of matching them at all.
+        title: (payload.title as string | null) ?? (row.purchase_title as string | null) ?? null,
+        quantity: (payload.quantity as number) ?? (row.item_count as number) ?? 1,
         status: row.status as string,
         lastMovementAt: (row.last_movement_at as string | null) ?? null,
         expectedDeliveryAt: (row.expected_delivery_at as string | null) ?? null,
@@ -357,7 +362,10 @@ export class AppService {
               (SELECT COUNT(*) FROM items i WHERE i.purchase_id = p.id) AS item_count,
               (SELECT i.cost_minor FROM items i WHERE i.purchase_id = p.id LIMIT 1) AS unit_minor,
               (SELECT COALESCE(SUM(r.amount_minor), 0) FROM refunds r
-                WHERE r.purchase_id = p.id AND r.received_at IS NULL) AS refund_outstanding
+                WHERE r.purchase_id = p.id AND r.received_at IS NULL) AS refund_outstanding,
+              (SELECT s.carrier FROM shipments s WHERE s.purchase_id = p.id LIMIT 1) AS carrier,
+              (SELECT s.tracking_number FROM shipments s WHERE s.purchase_id = p.id LIMIT 1) AS tracking_number,
+              (SELECT s.status FROM shipments s WHERE s.purchase_id = p.id LIMIT 1) AS shipment_status
        FROM purchases p
        ORDER BY p.ordered_at DESC`,
     ).all() as Record<string, unknown>[]
@@ -381,6 +389,9 @@ export class AppService {
         totalsConsistent: row.totals_consistent === 1,
         status: row.status as string,
         refundOutstanding: outstanding > 0 ? formatMoney(money(outstanding, currency)) : null,
+        carrier: (row.carrier as string | null) ?? null,
+        trackingNumber: (row.tracking_number as string | null) ?? null,
+        shipmentStatus: (row.shipment_status as string | null) ?? null,
       }
     })
 
@@ -428,7 +439,14 @@ export class AppService {
   /** Individual units, straight out of the reconciled `items` table. */
   listInventory(): ItemView[] {
     const rows = this.db.prepare(
-      `SELECT i.*, p.retailer AS retailer, p.external_order_id AS order_ref
+      `SELECT i.*,
+              p.retailer AS retailer,
+              p.external_order_id AS order_ref,
+              p.status AS purchase_status,
+              (SELECT s.carrier FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS carrier,
+              (SELECT s.tracking_number FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS tracking_number,
+              (SELECT s.status FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS shipment_status,
+              (SELECT s.expected_delivery_at FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS expected
        FROM items i LEFT JOIN purchases p ON p.id = i.purchase_id
        ORDER BY i.purchased_at DESC, i.id`,
     ).all() as Record<string, unknown>[]
@@ -454,6 +472,10 @@ export class AppService {
         location: (row.location as string | null) ?? null,
         retailer: (row.retailer as string | null) ?? null,
         orderRef: (row.order_ref as string | null) ?? null,
+        carrier: (row.carrier as string | null) ?? null,
+        trackingNumber: (row.tracking_number as string | null) ?? null,
+        shipmentStatus: (row.shipment_status as string | null) ?? null,
+        expectedDeliveryAt: (row.expected as string | null) ?? null,
       }
     })
   }
@@ -1115,6 +1137,10 @@ export interface PurchaseView {
   totalsConsistent: boolean
   status: string
   refundOutstanding: string | null
+  /** Where the parcel is, when a shipment has been matched to this order. */
+  carrier?: string | null
+  trackingNumber?: string | null
+  shipmentStatus?: string | null
 }
 
 export interface CancellationView {
@@ -1153,6 +1179,11 @@ export type SyncProgressFn = (progress: {
 export interface ItemView {
   id: string
   title: string
+  /** The parcel carrying this unit, once one is known. */
+  carrier?: string | null
+  trackingNumber?: string | null
+  shipmentStatus?: string | null
+  expectedDeliveryAt?: string | null
   brand: string | null
   sku: string | null
   size: string | null
