@@ -21,8 +21,11 @@ const NAV = [
   { label: 'Review', hue: 350 },
   { label: 'Reports', hue: 260 },
   { label: 'Settings', hue: 220 },
-  { label: 'Logs', hue: 20 },
 ] as const
+
+/** Reachable from Settings rather than the sidebar: it is somewhere you go
+ *  when something has gone wrong, not part of the daily rotation. */
+type Extra = 'Logs'
 
 const SUBTITLES: Record<string, string> = {
   Dashboard: 'What you have, what it cost, what is moving',
@@ -34,9 +37,10 @@ const SUBTITLES: Record<string, string> = {
   Reports: 'P&L, VAT and currency exposure',
   Settings: 'Mailboxes and integrations',
   Logs: 'Errors, warnings and crash reports',
+
 }
 
-export type Screen = (typeof NAV)[number]['label']
+export type Screen = (typeof NAV)[number]['label'] | Extra
 
 export function App() {
   const [screen, setScreen] = useState<Screen>('Dashboard')
@@ -128,10 +132,7 @@ export function App() {
           <button
             key={item.label}
             className={`nav-item${screen === item.label ? ' active' : ''}`}
-            onClick={() => {
-              setScreen(item.label)
-              if (item.label === 'Logs') setCrashCount(0)
-            }}
+            onClick={() => setScreen(item.label)}
           >
             <span className="nav-left">
               <span
@@ -143,7 +144,7 @@ export function App() {
             {item.label === 'Review' && summary && summary.reviewCount > 0 && (
               <span className="nav-badge">{summary.reviewCount}</span>
             )}
-            {item.label === 'Logs' && crashCount > 0 && (
+            {item.label === 'Settings' && crashCount > 0 && (
               <span className="nav-badge">{crashCount}</span>
             )}
           </button>
@@ -216,7 +217,15 @@ export function App() {
           {screen === 'Review' && <Review />}
           {screen === 'Logs' && <Logs />}
           {screen === 'Settings' && (
-            <Settings onAccountsChanged={refresh} onSync={syncNow} syncing={syncing} />
+            <Settings
+              onAccountsChanged={refresh}
+              onSync={syncNow}
+              syncing={syncing}
+              onOpenLogs={() => {
+                setScreen('Logs')
+                setCrashCount(0)
+              }}
+            />
           )}
           {(screen === 'Inventory' || screen === 'Sales' || screen === 'Reports') && (
             <Placeholder screen={screen} />

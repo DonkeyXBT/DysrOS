@@ -54,6 +54,14 @@ const api = {
     ipcRenderer.on('crash', listener)
     return () => ipcRenderer.removeListener('crash', listener)
   },
+  deleteAllData: (includeAccounts: boolean) =>
+    ipcRenderer.invoke('delete-all-data', includeAccounts),
+  discordSettings: () => ipcRenderer.invoke('discord-settings'),
+  discordSetWebhook: (url: string) => ipcRenderer.invoke('discord-set-webhook', url),
+  discordSetRule: (event: string, enabled: boolean) =>
+    ipcRenderer.invoke('discord-set-rule', event, enabled),
+  discordTest: () => ipcRenderer.invoke('discord-test'),
+  reparseAll: () => ipcRenderer.invoke('reparse-all'),
   aycdStatus: () => ipcRenderer.invoke('aycd-status'),
   aycdSetKey: (key: string) => ipcRenderer.invoke('aycd-set-key', key),
   aycdClearKey: () => ipcRenderer.invoke('aycd-clear-key'),
