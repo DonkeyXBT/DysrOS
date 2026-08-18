@@ -280,6 +280,42 @@ app.whenReady().then(() => {
     return { url: issueUrl(REPO, report), signature: report.signature, title: report.title }
   })
 
+  handle('delete-all-data', async (includeAccounts: boolean) => {
+    const choice = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Cancel', 'Delete everything'],
+      defaultId: 0,
+      cancelId: 0,
+      title: 'Delete all data',
+      message: includeAccounts
+        ? 'Delete all collected data and disconnect every mailbox?'
+        : 'Delete all collected data?',
+      detail:
+        'Inventory, purchases, shipments, events and the stored copies of your mail will be '
+        + 'removed. This cannot be undone. Mail itself is untouched in your mailbox and can be '
+        + 'synced again.',
+    })
+    if (choice.response !== 1) return { deleted: false }
+
+    const before = service.deleteAllData({ includeAccounts })
+    log.record('warn', 'app', new Error('all data deleted by request'), JSON.stringify(before))
+    mainWindow?.webContents.send('mail-updated', {})
+    return { deleted: true, ...before }
+  })
+
+  handle('discord-settings', () => service.discordSettings())
+  handle('discord-set-webhook', (url: string) => service.setDiscordWebhook(url))
+  handle('discord-set-rule', (event: string, enabled: boolean) => {
+    service.setDiscordRule(event, enabled)
+    return true
+  })
+  handle('discord-test', () => service.sendDiscordTest())
+  handle('reparse-all', async () => {
+    const result = await service.reparseAll()
+    mainWindow?.webContents.send('mail-updated', result)
+    return result
+  })
+
   ipcMain.handle('aycd-status', () => service.aycdStatus())
   ipcMain.handle('aycd-set-key', (_e, key: string) => service.setAycdApiKey(key))
   ipcMain.handle('aycd-clear-key', () => service.clearAycdApiKey())

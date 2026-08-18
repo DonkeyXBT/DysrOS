@@ -15,8 +15,15 @@ import { parseDutchAmount, parseDutchDayMonth } from './nl.js'
 
 const SENDER = 'automail@bol.com'
 
-/** bol.com order references: a C followed by nine uppercase alphanumerics. */
-const ORDER_REFERENCE = /\bC[0-9A-Z]{9}\b/
+/**
+ * A bol.com order reference: a letter, three digits, then six alphanumerics.
+ *
+ * The prefix is not always `C`. A real mailbox carries `A`-prefixed references
+ * in quantity, and a pattern assuming `C` produced a null reference for every
+ * one of them — which the reconciler then skipped, so those orders never became
+ * purchases at all.
+ */
+const ORDER_REFERENCE = /\b[A-Z]\d{3}[0-9A-Z]{6}\b/
 
 /** A line that is only a URL, bracketed or bare — how the text part renders
  *  images and buttons. Never content, and it sits where content is expected. */
@@ -109,8 +116,16 @@ function findOrderReference(all: string[]): string | null {
   // Shipping mails print the reference unlabelled on a line of its own. Only a
   // line that is *entirely* a reference counts, so a code appearing inside a
   // sentence is never picked up by accident.
-  const standalone = all.find((line) => /^C[0-9A-Z]{9}$/.test(line))
+  const standalone = all.find((line) => /^[A-Z]\d{3}[0-9A-Z]{6}$/.test(line))
   return standalone ?? null
+}
+
+/**
+ * Some order confirmations carry the reference in the subject instead of, or as
+ * well as, the body: "Bedankt voor je bestelling met bestelnummer A0007D41RW".
+ */
+function orderReferenceFromSubject(subject: string): string | null {
+  return ORDER_REFERENCE.exec(subject)?.[0] ?? null
 }
 
 export const bolOrderConfirmation: Parser = {
@@ -125,7 +140,7 @@ export const bolOrderConfirmation: Parser = {
 
   parse(message): ParsedEvent[] {
     const all = lines(message)
-    const orderId = findOrderReference(all)
+    const orderId = findOrderReference(all) ?? orderReferenceFromSubject(message.subject)
 
     // The item title sits on the line directly after the order reference.
     const referenceIndex = all.findIndex((line) => /^bestelnummer:/i.test(line))
@@ -182,8 +197,11 @@ export const bolCancellation: Parser = {
 
   matches(message) {
     if (message.fromAddress !== SENDER) return false
+    // The template id is the reliable signal; the subject wordings are the
+    // ones a real mailbox actually carries, kept as a fallback for mail whose
+    // template id has changed.
     return templateIs(message, 'CLI_ITEM_CANCELLED')
-      || /is geannuleerd/i.test(message.subject)
+      || /geannuleerd|annulering/i.test(message.subject)
   },
 
   parse(message): ParsedEvent[] {
@@ -239,6 +257,10 @@ export const bolShipmentConfirmation: Parser = {
 
   matches(message) {
     if (message.fromAddress !== SENDER) return false
+    // "Je pakket komt eraan" shares this template but is sent *before* dispatch:
+    // no carrier, no barcode, nothing to track yet. Treating it as a shipment
+    // fills the list with parcels that have not moved.
+    if (/komt eraan/i.test(message.subject)) return false
     return templateIs(message, 'CLI_SHIPMENT_CONFIRMATION')
       || /je pakket is nu bij/i.test(message.subject)
   },
@@ -277,7 +299,7 @@ export const bolShipmentConfirmation: Parser = {
     return [{
       type: 'shipped',
       retailer: 'bol',
-      externalOrderId: findOrderReference(all),
+      externalOrderId: findOrderReference(all) ?? orderReferenceFromSubject(message.subject),
       occurredAt: message.receivedAt,
       payload: {
         carrier,
@@ -301,8 +323,39 @@ export const bolShipmentConfirmation: Parser = {
   },
 }
 
+/**
+ * "Je pakket komt eraan" — bol.com has accepted the parcel but not handed it to
+ * a carrier. It names no carrier and carries no barcode, so it is recorded as
+ * an order being prepared rather than as a parcel in transit; the real shipping
+ * mail follows and supplies both.
+ */
+export const bolShipmentPending: Parser = {
+  id: 'bol-shipment-pending',
+  retailer: 'bol',
+
+  matches(message) {
+    if (message.fromAddress !== SENDER) return false
+    return /komt eraan/i.test(message.subject)
+  },
+
+  parse(message): ParsedEvent[] {
+    const all = lines(message)
+    return [{
+      type: 'order_confirmed',
+      retailer: 'bol',
+      externalOrderId: findOrderReference(all) ?? orderReferenceFromSubject(message.subject),
+      occurredAt: message.receivedAt,
+      payload: {
+        stage: 'awaiting_carrier',
+        trackingUrl: /https:\/\/link\.bol\.com\/t\/[^\s"'<>\]]+/.exec(message.html)?.[0] ?? null,
+      },
+    }]
+  },
+}
+
 export const BOL_PARSERS: readonly Parser[] = [
   bolOrderConfirmation,
   bolCancellation,
+  bolShipmentPending,
   bolShipmentConfirmation,
 ]

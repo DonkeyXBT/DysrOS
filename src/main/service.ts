@@ -1,7 +1,9 @@
-import { readFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs'
-import { basename, join } from 'node:path'
+import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { basename, dirname, join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { openDatabase, type Db } from '../core/db/connection.js'
-import { migrate } from '../core/db/migrations.js'
+import { migrate, currentVersion } from '../core/db/migrations.js'
 import { MessageRepo, hashContent } from '../core/repos/messages.js'
 import { EventRepo, type StoredEvent } from '../core/repos/events.js'
 import { loadEml, textOf } from '../core/mail/parsed-message.js'
@@ -17,6 +19,10 @@ import { AccountRepo, type Encryptor, type MailAccount, type NewAccount } from '
 import { MailboxSync } from '../core/mail/ingest.js'
 import { ImapFlowClient, testConnection, explainConnectionError } from '../core/mail/imapflow-client.js'
 import { AycdClient } from '../core/aycd/client.js'
+import {
+  sendToDiscord, sampleNotification, isWebhookUrl, maskWebhookUrl,
+  type NotifiableEvent, type NotificationInput,
+} from '../core/notify/discord.js'
 import { AYCD_TASK_BUILDERS } from '../core/aycd/tasks.js'
 import {
   AycdWatcher, systemClock, type CapturedEvent, type InboxTransport, type WatcherClock,
@@ -33,6 +39,23 @@ import {
 const AYCD_KEY_SETTING = 'aycd_api_key_cipher'
 const AYCD_ADDRESSES_SETTING = 'aycd_addresses'
 const AYCD_ERROR_SETTING = 'aycd_last_error'
+/** The schema version the derived tables were last built from. */
+const ENTITIES_VERSION_SETTING = 'entities_schema_version'
+/** The webhook URL is a secret: anyone holding it can post to the channel. */
+const DISCORD_WEBHOOK_SETTING = 'discord_webhook_cipher'
+
+/** Which events notify, and their default. Chosen so the noisy ones — an order
+ *  being placed, which you already know about — start switched off. */
+export const NOTIFIABLE_EVENTS: { event: NotifiableEvent; label: string; on: boolean }[] = [
+  { event: 'order_placed', label: 'Order placed', on: false },
+  { event: 'shipped', label: 'Order shipped', on: true },
+  { event: 'delivered', label: 'Order delivered', on: true },
+  { event: 'cancelled', label: 'Order cancelled', on: true },
+  { event: 'refunded', label: 'Refund received', on: true },
+  { event: 'sale', label: 'Item sold', on: true },
+  { event: 'payout', label: 'Payout received', on: true },
+  { event: 'shipment_exception', label: 'Shipment problem', on: true },
+]
 
 export function defaultFolderFor(provider: string): string {
   if (provider === 'gmail') return '[Gmail]/All Mail'
@@ -60,7 +83,16 @@ export class AppService {
   private readonly mailbox: MailboxSync
   private aycd: AycdWatcher | null = null
 
-  constructor(databasePath: string, private readonly encryptor: Encryptor) {
+  /** Where fetched mail is kept so a corrected parser can be re-run over it. */
+  private readonly rawDir: string
+
+  constructor(
+    databasePath: string,
+    private readonly encryptor: Encryptor,
+    rawDir?: string,
+  ) {
+    this.rawDir = rawDir
+      ?? (databasePath === ':memory:' ? join(tmpdir(), 'resell-ops-raw') : join(dirname(databasePath), 'mail-raw'))
     this.db = openDatabase(databasePath)
     migrate(this.db)
     this.messages = new MessageRepo(this.db)
@@ -69,6 +101,24 @@ export class AppService {
     this.accounts = new AccountRepo(this.db, encryptor)
     this.mailbox = new MailboxSync(this.db)
     this.ensureLocalAccount()
+    this.rebuildIfSchemaMoved()
+  }
+
+  /**
+   * Re-derives entities after a migration that added a column the reconciler
+   * fills.
+   *
+   * Events already carrying a `reconciled_at` are never revisited, so a new
+   * column keeps its default on every existing row — which showed up as blank
+   * item titles for everything recorded before the column existed.
+   */
+  private rebuildIfSchemaMoved(): void {
+    const current = String(currentVersion(this.db))
+    if (this.getSetting(ENTITIES_VERSION_SETTING) === current) return
+
+    const hasEvents = (this.db.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n
+    if (hasEvents > 0) this.rebuildEntities()
+    this.setSetting(ENTITIES_VERSION_SETTING, current)
   }
 
   getSetting(key: string): string | null {
@@ -128,6 +178,81 @@ export class AppService {
 
   /** Imported files are not tied to a mailbox yet, but messages require an
    *  account, so a single local placeholder stands in until IMAP lands. */
+  /** Keeps a copy of a fetched message, sharded so one directory never holds
+   *  tens of thousands of files. */
+  private storeRaw(contentHash: string, raw: Buffer): string {
+    try {
+      const shard = join(this.rawDir, contentHash.slice(0, 2))
+      mkdirSync(shard, { recursive: true })
+      const path = join(shard, `${contentHash}.eml`)
+      if (!existsSync(path)) writeFileSync(path, raw)
+      return path
+    } catch {
+      // Failing to keep a copy must not stop the message being processed.
+      return ''
+    }
+  }
+
+  /**
+   * Runs the current parsers over every message already stored, then rebuilds
+   * every entity from the corrected events.
+   *
+   * This is what makes a parser fix worth anything to data already collected:
+   * event identity is derived from the message and the parser, so re-running
+   * corrects history in place rather than duplicating it.
+   */
+  async reparseAll(): Promise<{ examined: number; reparsed: number; missing: number }> {
+    const rows = this.db
+      .prepare('SELECT id, raw_path FROM messages ORDER BY received_at')
+      .all() as { id: string; raw_path: string }[]
+
+    let reparsed = 0
+    let missing = 0
+    const now = new Date().toISOString()
+
+    for (const row of rows) {
+      if (!row.raw_path || !existsSync(row.raw_path)) {
+        missing += 1
+        continue
+      }
+      try {
+        const parsed = await loadEml(readFileSync(row.raw_path))
+        const result = this.registry.parse(parsed)
+        if (!result) {
+          this.messages.markUnrecognized(row.id)
+        } else {
+          this.events.replaceForMessage(row.id, result.parserId, result.events, now)
+          this.messages.markParsed(row.id, result.parserId, now)
+        }
+        reparsed += 1
+      } catch {
+        missing += 1
+      }
+    }
+
+    this.rebuildEntities(now)
+    return { examined: rows.length, reparsed, missing }
+  }
+
+  /**
+   * Discards derived rows and re-applies every event.
+   *
+   * Needed after a migration that adds a column the reconciler fills: already
+   * reconciled events are never revisited, so existing rows would keep the
+   * column's default forever and the screens would show blanks.
+   */
+  rebuildEntities(now = new Date().toISOString()): { applied: number; held: number } {
+    const rebuild = this.db.transaction(() => {
+      this.db.exec('DELETE FROM refunds')
+      this.db.exec('DELETE FROM items')
+      this.db.exec('DELETE FROM shipments')
+      this.db.exec('DELETE FROM purchases')
+      this.db.exec('UPDATE events SET reconciled_at = NULL')
+    })
+    rebuild()
+    return this.reconciler.run(now)
+  }
+
   private ensureLocalAccount(): void {
     const exists = this.db.prepare("SELECT 1 FROM accounts WHERE id = 'local-import'").get()
     if (exists) return
@@ -442,6 +567,10 @@ export class AppService {
     const contentHash = hashContent(raw.toString('utf8'))
     const already = this.messages.findByHash(contentHash) !== null
 
+    // Keeping the message is what makes a parser fix able to heal history:
+    // without it, correcting an extraction can only ever affect future mail.
+    const rawPath = this.storeRaw(contentHash, raw)
+
     const stored = this.messages.upsert({
       accountId,
       uid,
@@ -452,7 +581,7 @@ export class AppService {
       fromName: parsed.fromName,
       subject: parsed.subject || '(no subject)',
       receivedAt: parsed.receivedAt,
-      rawPath: '',
+      rawPath,
       bodyPreview: textOf(parsed, { preferHtml: true }).slice(0, 400),
     })
     if (already) return false
@@ -465,6 +594,130 @@ export class AppService {
     this.events.replaceForMessage(stored.id, result.parserId, result.events, now)
     this.messages.markParsed(stored.id, result.parserId, now)
     return true
+  }
+
+  /**
+   * Removes everything the application has collected.
+   *
+   * Mail accounts and integration keys are kept unless asked for too, because
+   * "start the data over" and "disconnect my mailboxes" are different
+   * intentions and conflating them makes the destructive one easy to trigger by
+   * accident. Retained message copies go as well — leaving them behind would
+   * mean a later re-read silently resurrecting what was just deleted.
+   */
+  deleteAllData(options: { includeAccounts?: boolean } = {}): {
+    messages: number
+    events: number
+    purchases: number
+    items: number
+  } {
+    const before = {
+      messages: (this.db.prepare('SELECT COUNT(*) AS n FROM messages').get() as { n: number }).n,
+      events: (this.db.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n,
+      purchases: (this.db.prepare('SELECT COUNT(*) AS n FROM purchases').get() as { n: number }).n,
+      items: (this.db.prepare('SELECT COUNT(*) AS n FROM items').get() as { n: number }).n,
+    }
+
+    const wipe = this.db.transaction(() => {
+      this.db.exec('DELETE FROM refunds')
+      this.db.exec('DELETE FROM sales')
+      this.db.exec('DELETE FROM items')
+      this.db.exec('DELETE FROM shipments')
+      this.db.exec('DELETE FROM purchase_lines')
+      this.db.exec('DELETE FROM purchases')
+      this.db.exec('DELETE FROM events')
+      this.db.exec('DELETE FROM messages')
+      // Cursors must go too: leaving them would make the next sync resume from
+      // where it stopped and never re-fetch what was just deleted.
+      this.db.exec('DELETE FROM folder_cursors')
+      if (options.includeAccounts) {
+        this.db.exec("DELETE FROM accounts WHERE id != 'local-import'")
+      }
+    })
+    wipe()
+
+    try {
+      rmSync(this.rawDir, { recursive: true, force: true })
+    } catch {
+      // A locked file must not leave the database half-cleared.
+    }
+
+    return before
+  }
+
+  // ---- Discord notifications ----------------------------------------------
+
+  setDiscordWebhook(url: string): { ok: boolean; message: string } {
+    const trimmed = url.trim()
+    if (trimmed.length === 0) {
+      this.db.prepare('DELETE FROM settings WHERE key = ?').run(DISCORD_WEBHOOK_SETTING)
+      return { ok: true, message: 'Webhook removed.' }
+    }
+    if (!isWebhookUrl(trimmed)) {
+      return { ok: false, message: 'That does not look like a Discord webhook URL.' }
+    }
+    this.setSetting(DISCORD_WEBHOOK_SETTING, this.encryptor.encrypt(trimmed))
+    return { ok: true, message: 'Webhook stored, encrypted with the OS keystore.' }
+  }
+
+  private discordWebhook(): string | null {
+    const cipher = this.getSetting(DISCORD_WEBHOOK_SETTING)
+    if (!cipher) return null
+    try {
+      return this.encryptor.decrypt(cipher)
+    } catch {
+      return null
+    }
+  }
+
+  discordSettings(): {
+    configured: boolean
+    masked: string
+    rules: { event: string; label: string; enabled: boolean }[]
+  } {
+    const url = this.discordWebhook()
+    const stored = this.db
+      .prepare('SELECT event_type, enabled FROM notification_rules')
+      .all() as { event_type: string; enabled: number }[]
+    const byEvent = new Map(stored.map((row) => [row.event_type, row.enabled === 1]))
+
+    return {
+      configured: url !== null,
+      masked: url ? maskWebhookUrl(url) : '—',
+      rules: NOTIFIABLE_EVENTS.map((rule) => ({
+        event: rule.event,
+        label: rule.label,
+        enabled: byEvent.get(rule.event) ?? rule.on,
+      })),
+    }
+  }
+
+  setDiscordRule(event: string, enabled: boolean): void {
+    this.db.prepare(
+      `INSERT INTO notification_rules (event_type, channel, enabled)
+       VALUES (?, 'discord', ?)
+       ON CONFLICT(event_type) DO UPDATE SET enabled = excluded.enabled`,
+    ).run(event, enabled ? 1 : 0)
+  }
+
+  async sendDiscordTest(): Promise<{ ok: boolean; message: string }> {
+    const url = this.discordWebhook()
+    if (!url) return { ok: false, message: 'No webhook is configured.' }
+    return sendToDiscord(url, [sampleNotification(new Date().toISOString())])
+  }
+
+  /** Posts the events a rule allows. Silent when nothing is configured, so the
+   *  rest of the pipeline never has to care whether Discord is set up. */
+  async notifyDiscord(inputs: NotificationInput[]): Promise<void> {
+    const url = this.discordWebhook()
+    if (!url || inputs.length === 0) return
+
+    const settings = this.discordSettings()
+    const allowed = new Set(settings.rules.filter((r) => r.enabled).map((r) => r.event))
+    const wanted = inputs.filter((input) => allowed.has(input.event))
+    if (wanted.length === 0) return
+
+    await sendToDiscord(url, wanted)
   }
 
   listProviders(): { id: string; label: string; host: string; port: number; requiresAppPassword: boolean; setupNote: string | null }[] {
@@ -510,15 +763,20 @@ export class AppService {
 
   /** The addresses Inbox should watch. Stored as JSON so the set survives a
    *  restart; a malformed value is treated as none rather than as a crash. */
+  /**
+   * Addresses AYCD Inbox watches.
+   *
+   * With none configured, every connected mailbox is watched: that is the
+   * obvious intent, and an empty list would otherwise mean Inbox silently
+   * watches nothing at all.
+   */
   listAycdAddresses(): string[] {
-    const raw = this.getSetting(AYCD_ADDRESSES_SETTING)
-    if (!raw) return []
-    try {
-      const parsed = JSON.parse(raw) as unknown
-      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
-    } catch {
-      return []
-    }
+    const stored = this.getSetting(AYCD_ADDRESSES_SETTING)
+    const configured = stored
+      ? (JSON.parse(stored) as string[]).map((a) => a.trim()).filter(Boolean)
+      : []
+    if (configured.length > 0) return configured
+    return this.accounts.list().filter((a) => a.enabled).map((a) => a.email)
   }
 
   setAycdAddresses(addresses: string[]): string[] {

@@ -247,3 +247,77 @@ describe('registry isolation across retailers', () => {
     expect(ids).toContain('pocketgames-order-confirmation')
   })
 })
+
+/**
+ * These pin faults that only appeared against a real mailbox. The original
+ * fixtures were all C-prefixed single-template mail, which hid every one.
+ */
+describe('bol.com variants found in a real mailbox', () => {
+  const from = 'bol <automail@bol.com>'
+
+  it('accepts an A-prefixed order reference, not only C', async () => {
+    const message = await eml({
+      from,
+      subject: 'Bedankt voor je bestelling',
+      body: '<p>Bestelnummer: A0007D41RW</p><p>Totaal</p><p>&euro; 24,99</p>',
+    })
+    const result = registry.parse(message)
+    expect(result!.events[0]!.externalOrderId).toBe('A0007D41RW')
+  })
+
+  it('reads the reference from the subject when the body omits it', async () => {
+    const message = await eml({
+      from,
+      subject: 'Bedankt voor je bestelling met bestelnummer A0007D40AT',
+      body: '<p>Bedankt voor je bestelling</p>',
+    })
+    expect(registry.parse(message)!.events[0]!.externalOrderId).toBe('A0007D40AT')
+  })
+
+  it('does not treat the pre-dispatch notice as a shipment', async () => {
+    const message = await eml({
+      from,
+      subject: 'Je pakket komt eraan',
+      body: '<p>Binnenkort wordt ie bezorgd.</p><p>A0007D3XX2</p>',
+    })
+    const result = registry.parse(message)
+
+    // No carrier and no barcode exist yet, so recording it as a parcel in
+    // transit fills the shipments list with things that have not moved.
+    expect(result!.parserId).toBe('bol-shipment-pending')
+    expect(result!.events[0]!.type).not.toBe('shipped')
+  })
+
+  it('still treats the real dispatch mail as a shipment', async () => {
+    const message = await eml({
+      from,
+      subject: 'Je pakket is nu bij DHL',
+      body: '<p>We hebben je pakket meegegeven met DHL!</p><p>A0007D3XX2</p>',
+    })
+    const result = registry.parse(message)
+    expect(result!.parserId).toBe('bol-shipment-confirmation')
+    expect(result!.events[0]!.payload.carrier).toBe('dhl')
+  })
+
+  it('claims the other cancellation wordings a real mailbox carries', async () => {
+    for (const subject of [
+      'Een artikel uit je bestelling is geannuleerd',
+      'We hebben je annulering verwerkt',
+      'Je bestelling is geannuleerd omdat er iets mis is gegaan tijdens de betaling',
+    ]) {
+      const message = await eml({ from, subject, body: '<p>Je bestelnummer is A0007D3P24</p>' })
+      const result = registry.parse(message)
+      expect(result, subject).not.toBeNull()
+      expect(result!.retailer).toBe('bol')
+    }
+  })
+
+  it('does not mistake a shorter code for an order reference', async () => {
+    const message = await eml({
+      from,
+      subject: 'Bedankt voor je bestelling',
+      body: '<p>Bestelnummer: A123</p>',
+    })
+    expect(registry.parse(message)!.events[0]!.externalOrderId).toBeNull()
+  })
+})

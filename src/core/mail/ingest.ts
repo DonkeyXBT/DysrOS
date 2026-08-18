@@ -88,7 +88,9 @@ export class MailboxSync {
     options: { limit?: number; initialLookbackDays?: number } = {},
   ): Promise<SyncResult> {
     const limit = options.limit ?? 200
-    const lookbackDays = options.initialLookbackDays ?? 90
+    // One month on a first sync. Three months of a busy mailbox is thousands of
+    // messages, most of them irrelevant, and it makes the first run feel broken.
+    const lookbackDays = options.initialLookbackDays ?? 30
 
     await client.connect()
     try {

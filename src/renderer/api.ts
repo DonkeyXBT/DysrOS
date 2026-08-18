@@ -45,6 +45,12 @@ export interface LogEntryView {
   detail: string | null
 }
 
+export interface DiscordSettingsView {
+  configured: boolean
+  masked: string
+  rules: { event: string; label: string; enabled: boolean }[]
+}
+
 export interface AycdStatusView {
   configured: boolean
   running: boolean
@@ -103,6 +109,14 @@ interface Api {
   crashReportUrl(index: number): Promise<{ url: string; signature: string; title: string } | null>
   reportRendererError(message: string, detail: string): Promise<LogEntryView>
   onCrash(handler: (entry: LogEntryView) => void): () => void
+  deleteAllData(includeAccounts: boolean): Promise<{
+    deleted: boolean; messages?: number; events?: number; purchases?: number; items?: number
+  }>
+  discordSettings(): Promise<DiscordSettingsView>
+  discordSetWebhook(url: string): Promise<{ ok: boolean; message: string }>
+  discordSetRule(event: string, enabled: boolean): Promise<boolean>
+  discordTest(): Promise<{ ok: boolean; message: string }>
+  reparseAll(): Promise<{ examined: number; reparsed: number; missing: number }>
   aycdStatus(): Promise<AycdStatusView>
   aycdSetKey(key: string): Promise<void>
   aycdClearKey(): Promise<void>
