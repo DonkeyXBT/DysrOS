@@ -55,6 +55,29 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
     }
     log.record('info', 'sync', `${reason} sync finished: ${result.fetched} fetched, ${result.stored} new`)
     mainWindow?.webContents.send('mail-updated', result)
+
+    // Barcodes are only reachable by following the retailer's redirect, so the
+    // lookup happens here rather than during parsing. Failures are logged and
+    // retried on the next pass; they never fail the sync.
+    try {
+      const tracking = await service.resolveTrackingCodes({
+        onProgress: (done, total) => {
+          mainWindow?.webContents.send('sync-progress', {
+            account: 'tracking',
+            done,
+            stored: total,
+            subject: `Resolving tracking codes (${done} of ${total})`,
+          })
+        },
+      })
+      if (tracking.attempted > 0) {
+        log.record('info', 'tracking', `resolved ${tracking.resolved} of ${tracking.attempted}`)
+        mainWindow?.webContents.send('mail-updated', { tracking })
+      }
+    } catch (error) {
+      log.record('warn', 'tracking', error)
+    }
+
     return result
   } catch (error) {
     const entry = log.record('error', 'sync', error)
@@ -296,6 +319,13 @@ app.whenReady().then(() => {
   ipcMain.handle('remove-account', (_e, id: string) => service.removeAccount(id))
   ipcMain.handle('test-account', (_e, connection) => service.testAccount(connection))
   ipcMain.handle('sync-accounts', () => runSync('manual'))
+
+  handle('resolve-tracking', async () => {
+    const result = await service.resolveTrackingCodes({ limit: 200 })
+    log.record('info', 'tracking', `manual resolve: ${result.resolved} of ${result.attempted}`)
+    mainWindow?.webContents.send('mail-updated', { tracking: result })
+    return result
+  })
 
   ipcMain.handle('encryption-available', () => safeStorage.isEncryptionAvailable())
 

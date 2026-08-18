@@ -3,6 +3,7 @@ import type { ParsedEvent } from '../repos/events.js'
 import type { Parser } from './registry.js'
 import { parseDutchAmount, parseDutchDayMonth } from './nl.js'
 import { classifyShipment, findShipmentTitle } from './bol-shipment-status.js'
+import { collectTrackingCandidates } from '../tracking/bol-links.js'
 
 /**
  * Parsers for bol.com.
@@ -286,7 +287,11 @@ export const bolShipmentConfirmation: Parser = {
     // bol.com does not put the carrier barcode in the mail. The only tracking
     // handle is an opaque redirect, which resolves to the real code only by
     // following it over the network.
-    const trackingUrl = /https:\/\/link\.bol\.com\/t\/[^\s"'<>\]]+/.exec(message.html)?.[0] ?? null
+    // Several bol links appear in a shipping mail and most lead to an account
+    // page. Keeping the ranked shortlist means the resolver can try the next
+    // one when the first turns out to be a dead end.
+    const candidates = collectTrackingCandidates(message.html)
+    const trackingUrl = candidates[0] ?? null
     const address = findDeliveryAddress(all)
 
     const delivered = variant?.status === 'delivered'
@@ -308,7 +313,8 @@ export const bolShipmentConfirmation: Parser = {
         delayed,
         trackingNumber: null,
         trackingUrl,
-        trackingResolvable: trackingUrl !== null,
+        trackingCandidates: candidates,
+        trackingResolvable: candidates.length > 0,
         deliveryPostalCode: address?.postalCode ?? null,
         deliveryPostalCodeFormatted: address?.postalCodeFormatted ?? null,
         deliveryCity: address?.city ?? null,

@@ -35,6 +35,8 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   const [shipments, setShipments] = useState<ShipmentView[] | null>(null)
   const [selected, setSelected] = useState<ShipmentView | null>(null)
   const [exported, setExported] = useState<string | null>(null)
+  const [resolving, setResolving] = useState(false)
+  const [resolveNote, setResolveNote] = useState<string | null>(null)
 
   useEffect(() => {
     void api.shipments().then(setShipments)
@@ -57,6 +59,7 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   }
 
   const redirectable = shipments.filter((s) => s.dhlRedirectable)
+  const awaiting = shipments.filter((s) => s.trackingNumber === null)
 
   if (shipments.length === 0) {
     return (
@@ -72,6 +75,45 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   return (
     <div style={{ display: 'flex', gap: 13, alignItems: 'flex-start' }}>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 11 }}>
+        {awaiting.length > 0 && (
+          <div
+            style={{
+              display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
+              borderRadius: 14, background: 'rgba(247,160,138,.10)', border: '1px solid #4a4030',
+            }}
+          >
+            <span style={{ fontSize: 12, fontWeight: 700, color: '#f2c3b4' }}>
+              {awaiting.length} parcel{awaiting.length === 1 ? '' : 's'} without a tracking code
+            </span>
+            <span style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>
+              the retailer sends a redirect, not the barcode — following it once gets the code
+            </span>
+            <button
+              className="btn"
+              style={{ marginLeft: 'auto' }}
+              disabled={resolving}
+              onClick={async () => {
+                setResolving(true)
+                setResolveNote(null)
+                try {
+                  const result = await api.resolveTracking()
+                  setResolveNote(
+                    `Resolved ${result.resolved} of ${result.attempted}` +
+                    (result.failed > 0 ? ` · ${result.failed} still unresolved` : ''),
+                  )
+                } finally {
+                  setResolving(false)
+                }
+              }}
+            >
+              {resolving ? 'Resolving…' : 'Get tracking codes'}
+            </button>
+          </div>
+        )}
+        {resolveNote && (
+          <div style={{ fontSize: 11.5, color: 'var(--teal)', paddingLeft: 4 }}>{resolveNote}</div>
+        )}
+
         {redirectable.length > 0 && (
           <div
             style={{

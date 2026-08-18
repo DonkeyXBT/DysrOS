@@ -125,6 +125,7 @@ interface Api {
   discordSetRule(event: string, enabled: boolean): Promise<boolean>
   discordTest(): Promise<{ ok: boolean; message: string }>
   reparseAll(): Promise<{ examined: number; reparsed: number; missing: number }>
+  resolveTracking(): Promise<{ attempted: number; resolved: number; failed: number }>
   aycdStatus(): Promise<AycdStatusView>
   aycdSetKey(key: string): Promise<void>
   aycdClearKey(): Promise<void>

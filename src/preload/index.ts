@@ -67,6 +67,7 @@ const api = {
     ipcRenderer.invoke('discord-set-rule', event, enabled),
   discordTest: () => ipcRenderer.invoke('discord-test'),
   reparseAll: () => ipcRenderer.invoke('reparse-all'),
+  resolveTracking: () => ipcRenderer.invoke('resolve-tracking'),
   aycdStatus: () => ipcRenderer.invoke('aycd-status'),
   aycdSetKey: (key: string) => ipcRenderer.invoke('aycd-set-key', key),
   aycdClearKey: () => ipcRenderer.invoke('aycd-clear-key'),
