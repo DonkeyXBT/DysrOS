@@ -247,7 +247,9 @@ app.whenReady().then(() => {
   ipcMain.handle('sync-accounts', async () => {
     log.record('info', 'sync', 'sync started')
     try {
-      const result = await service.syncAccounts()
+      const result = await service.syncAccounts(undefined, (progress) => {
+        mainWindow?.webContents.send('sync-progress', progress)
+      })
       for (const failure of result.failures) {
         log.record('warn', 'sync', new Error(failure.error), `account: ${failure.email}`)
       }
@@ -281,23 +283,9 @@ app.whenReady().then(() => {
     return { url: issueUrl(REPO, report), signature: report.signature, title: report.title }
   })
 
-  handle('delete-all-data', async (includeAccounts: boolean) => {
-    const choice = await dialog.showMessageBox({
-      type: 'warning',
-      buttons: ['Cancel', 'Delete everything'],
-      defaultId: 0,
-      cancelId: 0,
-      title: 'Delete all data',
-      message: includeAccounts
-        ? 'Delete all collected data and disconnect every mailbox?'
-        : 'Delete all collected data?',
-      detail:
-        'Inventory, purchases, shipments, events and the stored copies of your mail will be '
-        + 'removed. This cannot be undone. Mail itself is untouched in your mailbox and can be '
-        + 'synced again.',
-    })
-    if (choice.response !== 1) return { deleted: false }
-
+  // The confirmation is drawn by the application itself, so it matches the rest
+  // of the interface rather than appearing as a system dialog.
+  handle('delete-all-data', (includeAccounts: boolean) => {
     const before = service.deleteAllData({ includeAccounts })
     log.record('warn', 'app', new Error('all data deleted by request'), JSON.stringify(before))
     mainWindow?.webContents.send('mail-updated', {})

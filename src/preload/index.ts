@@ -49,6 +49,11 @@ const api = {
   crashReportUrl: (index: number) => ipcRenderer.invoke('crash-report-url', index),
   reportRendererError: (message: string, detail: string) =>
     ipcRenderer.invoke('report-renderer-error', message, detail),
+  onSyncProgress: (handler: (p: unknown) => void) => {
+    const listener = (_e: unknown, p: unknown) => handler(p)
+    ipcRenderer.on('sync-progress', listener)
+    return () => ipcRenderer.removeListener('sync-progress', listener)
+  },
   onCrash: (handler: (entry: unknown) => void) => {
     const listener = (_e: unknown, entry: unknown) => handler(entry)
     ipcRenderer.on('crash', listener)

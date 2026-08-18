@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type LogEntryView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
+import { SkeletonCards } from '../Skeleton.js'
 
 const LEVEL_COLOR: Record<string, string> = {
   error: 'oklch(0.70 0.17 18)',
@@ -44,7 +45,7 @@ export function Logs() {
     warn: all.filter((e) => e.level === 'warn').length,
   }
 
-  if (!entries) return <div className="empty"><span className="empty-body">Loading…</span></div>
+  if (!entries) return <SkeletonCards count={6} height={54} />
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>

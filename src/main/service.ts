@@ -495,7 +495,7 @@ export class AppService {
    * must not stop the others, so its error is recorded against that account and
    * the loop continues.
    */
-  async syncAccounts(folder?: string): Promise<{
+  async syncAccounts(folder?: string, onProgress?: SyncProgressFn): Promise<{
     accounts: number
     fetched: number
     stored: number
@@ -509,6 +509,9 @@ export class AppService {
     const perAccount: {
       email: string; folder: string; fetched: number; stored: number; startedFresh: boolean
     }[] = []
+
+    let handled = 0
+    let storedSoFar = 0
 
     for (const account of enabled) {
       const password = this.accounts.password(account.id)
@@ -531,7 +534,20 @@ export class AppService {
           account.id,
           box,
           client,
-          async ({ accountId, folder: f, uid, raw }) => this.ingestRaw(accountId, f, uid, raw),
+          async ({ accountId, folder: f, uid, raw }) => {
+            const isNew = await this.ingestRaw(accountId, f, uid, raw)
+            // Reported per message rather than per account: a mailbox can take
+            // minutes, and a progress bar that only moves at the end is no
+            // better than none.
+            handled += 1
+            onProgress?.({
+              account: account.email,
+              done: handled,
+              stored: isNew ? (storedSoFar += 1) : storedSoFar,
+              subject: this.messages.findByHash(hashContent(raw.toString('utf8')))?.subject ?? '',
+            })
+            return isNew
+          },
           { limit: 500 },
         )
         fetched += result.fetched
@@ -1008,6 +1024,13 @@ export interface ParserView {
   retailer: string
   parsed: number
 }
+
+export type SyncProgressFn = (progress: {
+  account: string
+  done: number
+  stored: number
+  subject: string
+}) => void
 
 export interface ItemView {
   id: string

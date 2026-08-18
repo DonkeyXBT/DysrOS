@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type ShipmentView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
+import { SkeletonTable } from '../Skeleton.js'
 
 const GRID = 'grid-template-columns:70px 110px 170px minmax(160px,1fr) 130px 100px 96px'
 
@@ -51,7 +52,9 @@ export function Shipments({ query }: { query: string }) {
   // Computed before the early returns: hooks must run on every render.
   const paged = usePaged(rows, term)
 
-  if (!shipments) return <div className="empty"><span className="empty-body">Loading…</span></div>
+  if (!shipments) {
+    return <SkeletonTable columns={gridStyle().gridTemplateColumns as string} minWidth={880} rows={8} />
+  }
 
   const redirectable = shipments.filter((s) => s.dhlRedirectable)
 

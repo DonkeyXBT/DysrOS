@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type PurchaseView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
+import { SkeletonTable } from '../Skeleton.js'
 
 const COLUMNS = '62px 104px 126px 92px minmax(170px,1fr) 44px 86px 86px 92px 116px 112px'
 
@@ -46,7 +47,7 @@ export function Purchases({ query }: { query: string }) {
   // returns below rather than after them.
   const paged = usePaged(filtered, `${kindFilter}|${term}`)
 
-  if (!rows) return <div className="empty"><span className="empty-body">Loading…</span></div>
+  if (!rows) return <SkeletonTable columns={COLUMNS} minWidth={1050} rows={10} />
 
   if (rows.length === 0) {
     return (

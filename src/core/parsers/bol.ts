@@ -2,6 +2,7 @@ import { textOf, type ParsedMessage } from '../mail/parsed-message.js'
 import type { ParsedEvent } from '../repos/events.js'
 import type { Parser } from './registry.js'
 import { parseDutchAmount, parseDutchDayMonth } from './nl.js'
+import { classifyShipment, findShipmentTitle } from './bol-shipment-status.js'
 
 /**
  * Parsers for bol.com.
@@ -69,6 +70,13 @@ export function findDeliveryAddress(all: string[]): DeliveryAddress | null {
     }
   }
   return null
+}
+
+/** The unit count that follows a given item title, wherever it sits. */
+function quantityNear(all: string[], title: string | null): number {
+  if (!title) return 1
+  const index = all.indexOf(title)
+  return index === -1 ? 1 : quantityAfter(all, index)
 }
 
 /** `3 stuks` on its own line is a unit count, as shown under an item title. */
@@ -257,67 +265,54 @@ export const bolShipmentConfirmation: Parser = {
 
   matches(message) {
     if (message.fromAddress !== SENDER) return false
-    // "Je pakket komt eraan" shares this template but is sent *before* dispatch:
-    // no carrier, no barcode, nothing to track yet. Treating it as a shipment
-    // fills the list with parcels that have not moved.
-    if (/komt eraan/i.test(message.subject)) return false
-    return templateIs(message, 'CLI_SHIPMENT_CONFIRMATION')
-      || /je pakket is nu bij/i.test(message.subject)
+    const variant = classifyShipment(message, textOf(message, { preferHtml: true }))
+    // Only mail describing a parcel with a carrier belongs here; the
+    // pre-dispatch notice is handled separately.
+    return variant !== null && variant.status !== 'awaiting_carrier'
   },
 
   parse(message): ParsedEvent[] {
     const all = lines(message)
-    const body = all.join('\n')
+    const body = textOf(message, { preferHtml: true })
+    const variant = classifyShipment(message, body)
 
-    const carrierMatch = /meegegeven met ([A-Za-zÀ-ü.]+)/i.exec(body)
-      ?? /je pakket is nu bij ([A-Za-zÀ-ü.]+)/i.exec(message.subject)
-    const carrierRaw = carrierMatch?.[1]?.replace(/[!.]+$/, '').trim() ?? null
-    const carrier = carrierRaw ? (CARRIERS[carrierRaw.toLowerCase()] ?? carrierRaw.toLowerCase()) : null
+    const title = findShipmentTitle(all, message.html)
 
     const deliveryMatch = /bezorgd op ([a-zà-ü]+dag\s+\d{1,2}\s+[a-zà-ü]+)/i.exec(body)
     const expectedDeliveryAt = deliveryMatch
       ? parseDutchDayMonth(deliveryMatch[1]!.replace(/^[a-zà-ü]+dag\s+/i, ''), message.receivedAt)
       : null
 
-    const headingIndex = all.findIndex((line) => /^dit is onderweg$/i.test(line))
-    let title: string | null = null
-    let titleIndex = -1
-    if (headingIndex !== -1) {
-      titleIndex = all.findIndex(
-        (line, i) => i > headingIndex && !/^\d+\s+artikel(en)?$/i.test(line),
-      )
-      title = titleIndex === -1 ? null : (all[titleIndex] ?? null)
-    }
-
-    // bol.com does not put the carrier barcode in this mail. The only tracking
-    // handle is an opaque redirect on link.bol.com, which resolves to the real
-    // code only by following it over the network — deliberately not done here,
-    // so parsing stays offline and deterministic.
+    // bol.com does not put the carrier barcode in the mail. The only tracking
+    // handle is an opaque redirect, which resolves to the real code only by
+    // following it over the network.
     const trackingUrl = /https:\/\/link\.bol\.com\/t\/[^\s"'<>\]]+/.exec(message.html)?.[0] ?? null
     const address = findDeliveryAddress(all)
 
+    const delivered = variant?.status === 'delivered'
+    const delayed = variant?.status === 'delayed' || variant?.status === 'delayed_again'
+
     return [{
-      type: 'shipped',
+      type: delivered ? 'delivered' : 'shipped',
       retailer: 'bol',
       externalOrderId: findOrderReference(all) ?? orderReferenceFromSubject(message.subject),
       occurredAt: message.receivedAt,
       payload: {
-        carrier,
+        carrier: variant?.carrier ?? null,
         direction: 'inbound',
         title,
         titleTruncated: title !== null && title.endsWith('...'),
-        quantity: titleIndex === -1 ? 1 : quantityAfter(all, titleIndex),
+        quantity: quantityNear(all, title),
         expectedDeliveryAt,
+        shipmentStatus: variant?.status ?? 'shipped_unknown_carrier',
+        delayed,
         trackingNumber: null,
         trackingUrl,
         trackingResolvable: trackingUrl !== null,
         deliveryPostalCode: address?.postalCode ?? null,
         deliveryPostalCodeFormatted: address?.postalCodeFormatted ?? null,
         deliveryCity: address?.city ?? null,
-        // The DHL ServicePoint redirect tool needs a tracking code and a postal
-        // code. The code arrives later from the link resolver, so this only
-        // reports that the postal-code half is in hand.
-        dhlRedirectable: carrier === 'dhl' && address !== null,
+        dhlRedirectable: variant?.carrier === 'dhl' && address !== null,
       },
     }]
   },
