@@ -65,6 +65,19 @@ jobs:
           fi
           echo "Releasing version $PKG"
 
+      # electron-builder uploads assets in parallel, and if the release does not
+      # exist yet each upload races to create it — which produced two releases
+      # for the same tag, one holding the installer and the other the blockmap.
+      # Creating it up front means every upload lands in the same release.
+      - name: Create the release up front
+        shell: bash
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME"               --title "${GITHUB_REF_NAME#v}"               --notes "Installer is attached below. Windows SmartScreen will warn on first run: the build is not code-signed."               --verify-tag
+          fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Build and publish
         run: npm run release
         env:
