@@ -1,0 +1,194 @@
+import { useCallback, useEffect, useState } from 'react'
+import { api, type SummaryView } from './api.js'
+import { Dashboard } from './screens/Dashboard.js'
+import { Shipments } from './screens/Shipments.js'
+import { Purchases } from './screens/Purchases.js'
+import { Review } from './screens/Review.js'
+import { Settings } from './screens/Settings.js'
+import { Placeholder } from './screens/Placeholder.js'
+import { TitleBar } from './TitleBar.js'
+import { Updater } from './Updater.js'
+
+/** Nav order and per-item hue, both taken from the mockup. */
+const NAV = [
+  { label: 'Dashboard', hue: 178 },
+  { label: 'Inventory', hue: 225 },
+  { label: 'Purchases', hue: 285 },
+  { label: 'Sales', hue: 148 },
+  { label: 'Shipments', hue: 40 },
+  { label: 'Review', hue: 350 },
+  { label: 'Reports', hue: 260 },
+  { label: 'Settings', hue: 220 },
+] as const
+
+const SUBTITLES: Record<string, string> = {
+  Dashboard: 'What you have, what it cost, what is moving',
+  Inventory: 'Units held or in flight',
+  Purchases: 'Retailer orders and refunds',
+  Sales: 'Payouts and profit by channel',
+  Shipments: 'Track and trace, both directions',
+  Review: 'Emails no parser recognised',
+  Reports: 'P&L, VAT and currency exposure',
+  Settings: 'Accounts, notifications, parsers',
+}
+
+export type Screen = (typeof NAV)[number]['label']
+
+export function App() {
+  const [screen, setScreen] = useState<Screen>('Dashboard')
+  const [summary, setSummary] = useState<SummaryView | null>(null)
+  const [query, setQuery] = useState('')
+  const [flash, setFlash] = useState<string | null>(null)
+  const [updaterOpen, setUpdaterOpen] = useState(false)
+  const [syncing, setSyncing] = useState(false)
+
+  const refresh = useCallback(async () => {
+    setSummary(await api.summary())
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+    // The main process ingests on launch and whenever new mail lands, so the UI
+    // follows along rather than asking anyone to import anything.
+    return api.onMailUpdated(() => {
+      void refresh()
+    })
+  }, [refresh])
+
+  /**
+   * Syncing lives here rather than on the Settings screen, so switching screens
+   * mid-sync neither cancels it nor loses sight of it. The work itself runs in
+   * the main process; this only tracks whether it is still going.
+   */
+  const syncNow = useCallback(async () => {
+    if (syncing) return
+    setSyncing(true)
+    setFlash(null)
+    try {
+      const result = await api.syncAccounts()
+      setFlash(
+        result.failures.length > 0
+          ? `${result.failures[0]!.email}: ${result.failures[0]!.error}`
+          : result.accounts === 0
+            ? 'No mailbox connected yet - add one in Settings.'
+            : `Pulled ${result.fetched} message${result.fetched === 1 ? '' : 's'} from ` +
+              `${result.accounts} account${result.accounts === 1 ? '' : 's'} - ${result.stored} new`,
+      )
+      await refresh()
+    } catch (error) {
+      setFlash(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSyncing(false)
+    }
+  }, [refresh, syncing])
+
+  return (
+    <div className="app">
+      <TitleBar screen={screen} onOpenUpdater={() => setUpdaterOpen(true)} />
+      {updaterOpen && <Updater onClose={() => setUpdaterOpen(false)} />}
+      <div className="shell">
+      <aside className="sidebar">
+        <div className="brand">
+          <div className="brand-mark">R</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            <div className="brand-name">Resell Ops</div>
+            <div className="brand-sub">local · one seat</div>
+          </div>
+        </div>
+
+        {NAV.map((item) => (
+          <button
+            key={item.label}
+            className={`nav-item${screen === item.label ? ' active' : ''}`}
+            onClick={() => setScreen(item.label)}
+          >
+            <span className="nav-left">
+              <span
+                className="nav-dot"
+                style={{ background: `oklch(0.76 0.13 ${item.hue})` }}
+              />
+              <span>{item.label}</span>
+            </span>
+            {item.label === 'Review' && summary && summary.reviewCount > 0 && (
+              <span className="nav-badge">{summary.reviewCount}</span>
+            )}
+          </button>
+        ))}
+
+        <div style={{ flex: 1 }} />
+
+        <button className="sync" onClick={syncNow} disabled={syncing}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                width: 7, height: 7, borderRadius: '50%', flex: 'none',
+                background: syncing
+                  ? 'oklch(0.76 0.12 232)'
+                  : summary?.messageCount ? 'oklch(0.78 0.12 148)' : 'oklch(0.66 0.02 265)',
+                animation: syncing ? 'pulseGlow 1.4s ease-in-out infinite' : 'none',
+              }}
+            />
+            <span className="sync-title">{syncing ? 'Syncing mail' : 'Sync now'}</span>
+          </div>
+          <div className="sync-detail">
+            {syncing
+              ? 'Running in the background, you can keep working'
+              : summary
+                ? `${summary.messageCount} message${summary.messageCount === 1 ? '' : 's'} · ${summary.eventCount} events`
+                : 'Starting up'}
+          </div>
+        </button>
+      </aside>
+
+        <main className="main">
+        <header className="topbar">
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+            <h1>{screen}</h1>
+            <div className="topbar-sub">{SUBTITLES[screen]}</div>
+          </div>
+          <div style={{ flex: 1 }} />
+          <div className="search">
+            <span
+              style={{
+                width: 11, height: 11, border: '1.5px solid #6f7789',
+                borderRadius: '50%', flex: 'none',
+              }}
+            />
+            <input
+              value={query}
+              placeholder="Search title or order ref"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </div>
+          <div className="avatar">DN</div>
+        </header>
+
+        {flash && (
+          <div className="banner">
+            <span className="banner-dot" />
+            <span>{flash}</span>
+            <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setFlash(null)}>
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        <div className="content">
+          {screen === 'Dashboard' && <Dashboard summary={summary} onSync={syncNow} />}
+          {screen === 'Shipments' && <Shipments query={query} />}
+          {screen === 'Purchases' && <Purchases query={query} />}
+          {screen === 'Review' && <Review />}
+          {screen === 'Settings' && <Settings
+              mailDir={mailDir}
+              onMailDirChange={setMailDir}
+              onAccountsChanged={refresh}
+            />}
+          {(screen === 'Inventory' || screen === 'Sales' || screen === 'Reports') && (
+            <Placeholder screen={screen} />
+          )}
+        </div>
+        </main>
+      </div>
+    </div>
+  )
+}

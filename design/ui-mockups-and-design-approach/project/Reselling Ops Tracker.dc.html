@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet data-dc-atomics>
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+html,body{margin:0;padding:0;background:#0b0d12;color:#e8eaf0;font-family:'Plus Jakarta Sans',system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+*{box-sizing:border-box}
+a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#272d3a;border-radius:8px;border:3px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-track{background:transparent}
+@keyframes pulseGlow{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes shim{0%{opacity:.35}50%{opacity:.7}100%{opacity:.35}}
+</style>
+</helmet>
+<div style="display:flex;height:100vh;width:100%;overflow:hidden;background:#0b0d12;padding:14px;gap:14px">
+
+  <aside style="width:214px;flex:none;display:flex;flex-direction:column;gap:3px;padding:16px 12px 12px;background:#141824;border:1px solid #1f2532;border-radius:22px;box-shadow:0 18px 50px rgba(0,0,0,.45)">
+    <div style="display:flex;align-items:center;gap:10px;padding:2px 8px 16px">
+      <div style="width:30px;height:30px;border-radius:11px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#0b0d12">R</div>
+      <div style="display:flex;flex-direction:column;gap:1px">
+        <div style="font-size:13px;font-weight:700;letter-spacing:-.01em">Resell Ops</div>
+        <div style="font-size:10.5px;color:#6f7789">local · one seat</div>
+      </div>
+    </div>
+    <sc-for list="{{ nav }}" as="n" hint-placeholder-count="8">
+      <button onClick="{{ n.go }}" style="{{ n.style }}" style-hover="background:#1b2130">
+        <span style="display:flex;align-items:center;gap:10px"><span style="{{ n.dotStyle }}"></span><span>{{ n.label }}</span></span>
+        <sc-if value="{{ n.badge }}" hint-placeholder-val="{{ false }}">
+          <span style="min-width:20px;height:19px;padding:0 6px;border-radius:7px;background:#ff6a9c;color:#170a12;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px rgba(255,106,156,.14)">{{ n.badge }}</span>
+        </sc-if>
+      </button>
+    </sc-for>
+    <div style="flex:1"></div>
+    <button onClick="{{ triggerSync }}" style="text-align:left;width:100%;border:1px solid #232a38;background:#10141e;border-radius:16px;padding:11px 12px;cursor:pointer;color:inherit;font-family:inherit;display:flex;flex-direction:column;gap:6px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="{{ sync.dot }}"></span>
+        <span style="font-size:11.5px;font-weight:700;color:#c9d0e0">{{ sync.title }}</span>
+      </div>
+      <div style="font-size:10.5px;color:#7a8296;line-height:1.35">{{ sync.detail }}</div>
+      <sc-if value="{{ sync.showBar }}" hint-placeholder-val="{{ false }}">
+        <div style="height:3px;border-radius:3px;background:#232a38;overflow:hidden;width:100%"><div style="{{ sync.barStyle }}"></div></div>
+      </sc-if>
+    </button>
+  </aside>
+
+  <main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;background:#0f121a;border:1px solid #1c2230;border-radius:22px">
+    <header style="flex:none;display:flex;align-items:center;gap:16px;padding:15px 20px;border-bottom:1px solid #1a2029">
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+        <h1 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-.02em">{{ screenTitle }}</h1>
+        <div style="font-size:11.5px;color:#6f7789">{{ screenSub }}</div>
+      </div>
+      <div style="flex:1"></div>
+      <div style="display:flex;align-items:center;gap:8px;background:#161b26;border:1px solid #232a38;border-radius:999px;padding:7px 13px;width:250px">
+        <span style="width:11px;height:11px;border:1.5px solid #6f7789;border-radius:50%;flex:none"></span>
+        <input value="{{ query }}" onChange="{{ onQuery }}" placeholder="Search title or SKU" style="border:0;background:transparent;outline:none;color:#e8eaf0;font-family:inherit;font-size:12.5px;width:100%"/>
+      </div>
+      <button onClick="{{ cycleState }}" style="border:1px solid #232a38;background:#161b26;color:#8d94a6;border-radius:999px;padding:7px 13px;font-size:11.5px;font-family:inherit;cursor:pointer" style-hover="color:#e8eaf0">{{ stateLabel }}</button>
+      <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(140deg,#f7a08a,#e86aa0);display:flex;align-items:center;justify-content:center;color:#1a1d26;font-weight:800;font-size:12px">JV</div>
+    </header>
+
+    <sc-if value="{{ showStale }}" hint-placeholder-val="{{ false }}">
+      <div style="flex:none;display:flex;align-items:center;gap:12px;padding:9px 20px;background:linear-gradient(90deg,rgba(247,160,138,.16),rgba(247,160,138,.03));border-bottom:1px solid #2c2530">
+        <span style="width:7px;height:7px;border-radius:50%;background:#f7a08a;animation:pulseGlow 2s ease-in-out infinite"></span>
+        <span style="font-size:12px;color:#e4c7bd">Figures may be out of date — last successful sync was 3 hours ago. Nothing here is wrong, just possibly incomplete.</span>
+        <button onClick="{{ triggerSync }}" style="margin-left:auto;border:1px solid #3a3038;background:transparent;color:#f2c3b4;border-radius:8px;padding:4px 10px;font-size:11.5px;font-family:inherit;cursor:pointer">Sync now</button>
+      </div>
+    </sc-if>
+
+    <div style="flex:1;min-height:0;overflow:auto;padding:18px 20px 26px">
+
+      <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <sc-for list="{{ skeleton }}" as="s" hint-placeholder-count="10">
+            <div style="{{ s.style }}"></div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isFirstRun }}" hint-placeholder-val="{{ false }}">
+        <div style="max-width:520px;margin:78px auto;text-align:center;display:flex;flex-direction:column;align-items:center;gap:14px">
+          <div style="width:64px;height:64px;border-radius:22px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);opacity:.9"></div>
+          <h2 style="margin:0;font-size:19px;font-weight:700;letter-spacing:-.02em">Nothing here yet</h2>
+          <p style="margin:0;font-size:13px;line-height:1.6;color:#8d94a6">This tool fills itself from your mailboxes. Connect an email account and the first sync pulls in orders, sales, refunds and tracking mail from the last 90 days.</p>
+          <button onClick="{{ goSettings }}" style="margin-top:4px;border:0;border-radius:12px;padding:11px 20px;background:#5b8cff;color:#0b1020;font-weight:700;font-size:12.5px;font-family:inherit;cursor:pointer">Connect an email account</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showDashboard }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;flex-direction:column;gap:13px">
+          <sc-if value="{{ attentionFirst }}" hint-placeholder-val="{{ true }}">
+            <section style="border:1px solid #33262c;border-radius:20px;background:linear-gradient(135deg,rgba(232,106,160,.10),rgba(247,160,138,.03));padding:14px 16px">
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:11px">
+                <h2 style="margin:0;font-size:13px;font-weight:700">Needs you</h2>
+                <span style="font-size:11px;color:#8d94a6">4 things, oldest first</span>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
+                <sc-for list="{{ attention }}" as="a" hint-placeholder-count="4">
+                  <button onClick="{{ a.go }}" style="text-align:left;cursor:pointer;font-family:inherit;color:inherit;border:1px solid #2a3040;background:#151a26;border-radius:16px;padding:11px 12px;display:flex;flex-direction:column;gap:5px" style-hover="border-color:#3d4considered">
+                    <div style="display:flex;align-items:center;gap:7px">
+                      <span style="{{ a.dot }}"></span>
+                      <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#98a0b3">{{ a.kind }}</span>
+                    </div>
+                    <div style="font-size:12.5px;font-weight:600;line-height:1.3">{{ a.title }}</div>
+                    <div style="font-size:11.5px;color:#7a8296">{{ a.meta }}</div>
+                  </button>
+                </sc-for>
+              </div>
+            </section>
+          </sc-if>
+
+          <section style="display:grid;grid-template-columns:1.55fr 1fr;gap:13px">
+            <div style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:13px">
+              <div style="display:flex;align-items:center;gap:10px">
+                <h2 style="margin:0;font-size:13px;font-weight:700">Profit &amp; margin</h2>
+                <div style="margin-left:auto;display:flex;gap:3px;background:#10141e;border:1px solid #232a38;border-radius:999px;padding:3px">
+                  <sc-for list="{{ periods }}" as="p" hint-placeholder-count="5">
+                    <button onClick="{{ p.go }}" style="{{ p.style }}">{{ p.label }}</button>
+                  </sc-for>
+                </div>
+              </div>
+              <div style="display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap">
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:10.5px;color:#7a8296;letter-spacing:.05em">NET PROFIT</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:33px;font-weight:600;letter-spacing:-.03em;line-height:1">{{ d.netProfit }}</div>
+                  <div style="font-size:11.5px;color:#6ee7d4">{{ d.delta }}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:10.5px;color:#7a8296;letter-spacing:.05em">MARGIN</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:33px;font-weight:600;letter-spacing:-.03em;line-height:1;color:#6ee7d4">{{ d.margin }}</div>
+                </div>
+                <svg viewBox="0 0 220 56" preserveAspectRatio="none" style="height:56px;flex:1;min-width:140px">
+                  <path d="{{ d.sparkArea }}" fill="rgba(110,231,212,.10)"></path>
+                  <path d="{{ d.spark }}" fill="none" stroke="#6ee7d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
+                </svg>
+              </div>
+              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;border-top:1px solid #1f2532;padding-top:12px">
+                <sc-for list="{{ d.breakdown }}" as="b" hint-placeholder-count="3">
+                  <div style="display:flex;flex-direction:column;gap:3px">
+                    <div style="font-size:10.5px;color:#7a8296;letter-spacing:.04em">{{ b.label }}</div>
+                    <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:500">{{ b.value }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:13px">
+              <div style="flex:1;border-radius:20px;background:linear-gradient(140deg,#f7a08a,#e86aa0);padding:15px 16px;display:flex;flex-direction:column;color:#1c1418;min-height:104px">
+                <div style="display:flex;align-items:flex-start">
+                  <div style="font-size:12.5px;font-weight:700;line-height:1.25">Inbound<br/>in flight</div>
+                  <button onClick="{{ goShipments }}" style="margin-left:auto;width:26px;height:26px;border-radius:10px;border:0;background:rgba(255,255,255,.42);color:#1c1418;cursor:pointer;font-size:12px">↗</button>
+                </div>
+                <div style="flex:1"></div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:31px;font-weight:600;letter-spacing:-.03em">{{ d.inbound }}</div>
+                <div style="font-size:11px;font-weight:600;opacity:.75">{{ d.inboundStalled }}</div>
+              </div>
+              <div style="flex:1;border-radius:20px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);padding:15px 16px;display:flex;flex-direction:column;color:#101720;min-height:104px">
+                <div style="display:flex;align-items:flex-start">
+                  <div style="font-size:12.5px;font-weight:700;line-height:1.25">Outbound<br/>to buyers</div>
+                  <button onClick="{{ goShipments }}" style="margin-left:auto;width:26px;height:26px;border-radius:10px;border:0;background:rgba(255,255,255,.42);color:#101720;cursor:pointer;font-size:12px">↗</button>
+                </div>
+                <div style="flex:1"></div>
+                <div style="font-family:'JetBrains Mono',monospace;font-size:31px;font-weight:600;letter-spacing:-.03em">{{ d.outbound }}</div>
+                <div style="font-size:11px;font-weight:600;opacity:.75">{{ d.outboundStalled }}</div>
+              </div>
+            </div>
+          </section>
+
+          <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px">
+            <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:13px;flex-wrap:wrap">
+              <h2 style="margin:0;font-size:13px;font-weight:700">Stock on hand</h2>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#c9d0e0">{{ d.units }} units</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#c9d0e0">{{ d.capital }} tied up</span>
+              <button onClick="{{ goInventory }}" style="margin-left:auto;border:1px solid #232a38;background:transparent;color:#8fb0ff;border-radius:999px;padding:5px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Open inventory</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:11px">
+              <sc-for list="{{ d.aging }}" as="g" hint-placeholder-count="4">
+                <button onClick="{{ g.go }}" style="{{ g.style }}">
+                  <div style="display:flex;align-items:baseline;gap:8px">
+                    <span style="font-size:11.5px;font-weight:700;color:#c9d0e0">{{ g.bucket }} days</span>
+                    <span style="{{ g.tagStyle }}">{{ g.tag }}</span>
+                  </div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:21px;font-weight:600;letter-spacing:-.02em">{{ g.units }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#8d94a6">{{ g.value }}</div>
+                  <div style="height:4px;border-radius:4px;background:#1d2331;overflow:hidden"><div style="{{ g.barStyle }}"></div></div>
+                </button>
+              </sc-for>
+            </div>
+          </section>
+
+          <sc-if value="{{ metricsFirst }}" hint-placeholder-val="{{ false }}">
+            <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:14px 16px">
+              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+                <h2 style="margin:0;font-size:13px;font-weight:700">Anomalies</h2>
+                <span style="font-size:11px;color:#8d94a6">stalled tracking and overdue deliveries</span>
+              </div>
+              <sc-for list="{{ attention }}" as="a" hint-placeholder-count="4">
+                <button onClick="{{ a.go }}" style="text-align:left;width:100%;cursor:pointer;font-family:inherit;color:inherit;border:0;background:transparent;border-top:1px solid #1c2230;padding:9px 4px;display:flex;align-items:center;gap:12px" style-hover="background:#171d2a">
+                  <span style="{{ a.dot }}"></span>
+                  <span style="font-size:12.5px;font-weight:600;flex:1;min-width:0">{{ a.title }}</span>
+                  <span style="font-size:11.5px;color:#7a8296">{{ a.meta }}</span>
+                </button>
+              </sc-for>
+            </section>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showInventory }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:11px">
+          <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
+            <sc-for list="{{ statusFilters }}" as="f" hint-placeholder-count="9">
+              <button onClick="{{ f.go }}" style="{{ f.style }}"><span style="{{ f.dot }}"></span>{{ f.label }} <span style="opacity:.55;font-family:'JetBrains Mono',monospace">{{ f.count }}</span></button>
+            </sc-for>
+            <div style="flex:1"></div>
+            <button onClick="{{ toggleDensity }}" style="border:1px solid #2b3346;background:#171d2a;color:#a9b1c2;border-radius:999px;padding:6px 12px;font-size:11.5px;font-family:inherit;cursor:pointer">{{ densityLabel }}</button>
+            <button style="border:0;background:#5b8cff;color:#0b1020;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer">+ Add item</button>
+          </div>
+
+          <sc-if value="{{ hasSelection }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;align-items:center;gap:12px;padding:9px 14px;border-radius:14px;background:rgba(91,140,255,.10);border:1px solid #2b3a5e">
+              <span style="font-size:12px;font-weight:700;color:#b9cdff">{{ selectionLabel }}</span>
+              <div style="display:flex;gap:6px;margin-left:auto">
+                <sc-for list="{{ bulkActions }}" as="b" hint-placeholder-count="3">
+                  <button style="border:1px solid #2b3a5e;background:#131a2a;color:#c9d0e0;border-radius:999px;padding:5px 11px;font-size:11.5px;font-family:inherit;cursor:pointer">{{ b.label }}</button>
+                </sc-for>
+                <button onClick="{{ clearSelection }}" style="border:0;background:transparent;color:#7a8296;font-size:11.5px;font-family:inherit;cursor:pointer">Clear</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <div style="border:1px solid #1f2532;border-radius:18px;background:#141824;overflow:hidden">
+           <div style="overflow-x:auto;max-width:100%">
+            <div style="{{ invHeadStyle }}">
+              <div></div><div></div>
+              <sc-for list="{{ invCols }}" as="c" hint-placeholder-count="10">
+                <button onClick="{{ c.go }}" style="{{ c.style }}">{{ c.label }}<span style="color:#5b8cff">{{ c.arrow }}</span></button>
+              </sc-for>
+            </div>
+            <sc-for list="{{ rows }}" as="r" hint-placeholder-count="14">
+              <div onClick="{{ r.open }}" style="{{ r.style }}" style-hover="background:#181e2b">
+                <button onClick="{{ r.toggle }}" style="{{ r.checkStyle }}">{{ r.check }}</button>
+                <div style="{{ r.thumbStyle }}"></div>
+                <div style="min-width:0">
+                  <div style="font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ r.title }}</div>
+                  <div style="font-size:10px;color:#6f7789;font-family:'JetBrains Mono',monospace">{{ r.sku }}</div>
+                </div>
+                <div style="{{ r.cell }}">{{ r.brand }}</div>
+                <div style="{{ r.cellMono }}">{{ r.size }}</div>
+                <div><span style="{{ r.statusChip }}"><span style="{{ r.statusDot }}"></span>{{ r.statusLabel }}</span></div>
+                <div style="{{ r.cellMono }}">{{ r.purchasedAt }}</div>
+                <div style="{{ r.cellMonoRight }}">{{ r.purchasePrice }}</div>
+                <div style="{{ r.cellMonoRight }}">{{ r.listedPrice }}</div>
+                <div style="{{ r.daysCell }}">{{ r.daysHeld }}</div>
+                <div style="{{ r.cell }}">{{ r.location }}</div>
+                <div style="{{ r.cell }}">{{ r.retailer }}</div>
+              </div>
+            </sc-for>
+           </div>
+            <sc-if value="{{ noMatch }}" hint-placeholder-val="{{ false }}">
+              <div style="padding:44px 20px;text-align:center;display:flex;flex-direction:column;gap:8px;align-items:center">
+                <div style="font-size:13.5px;font-weight:700">No items match these filters</div>
+                <div style="font-size:12px;color:#8d94a6">{{ totalItems }} items in total. Try clearing the status filter or the search box.</div>
+                <button onClick="{{ resetFilters }}" style="margin-top:4px;border:1px solid #2b3346;background:#171d2a;color:#c9d0e0;border-radius:999px;padding:7px 14px;font-size:11.5px;font-family:inherit;cursor:pointer">Clear filters</button>
+              </div>
+            </sc-if>
+          </div>
+          <div style="font-size:11px;color:#5f6779;padding-left:4px">{{ rowCountLabel }} · click a row to open · Esc closes</div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showPurchases }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:11px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button onClick="{{ toggleRefundOnly }}" style="{{ refundFilterStyle }}">Outstanding refunds only <span style="font-family:'JetBrains Mono',monospace;opacity:.7">{{ refundCount }}</span></button>
+            <span style="font-size:11.5px;color:#7a8296">{{ refundTotalLabel }}</span>
+          </div>
+          <div style="border:1px solid #1f2532;border-radius:18px;background:#141824;overflow:hidden">
+           <div style="overflow-x:auto;max-width:100%">
+            <div style="{{ purHeadStyle }}">
+              <div></div><div>Retailer</div><div>Order ref</div><div>Date</div><div style="text-align:right">Items</div><div style="text-align:right">Subtotal</div><div style="text-align:right">Shipping</div><div style="text-align:right">VAT</div><div style="text-align:right">Total</div><div>Status</div><div style="text-align:right">Refund due</div>
+            </div>
+            <sc-for list="{{ purchases }}" as="p" hint-placeholder-count="7">
+              <div style="border-top:1px solid #1c2230">
+                <div onClick="{{ p.toggle }}" style="{{ p.style }}" style-hover="background:#181e2b">
+                  <div style="color:#6f7789;font-size:9px">{{ p.caret }}</div>
+                  <div style="font-weight:600;font-size:12.5px">{{ p.retailer }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8d94a6">{{ p.ref }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8d94a6">{{ p.date }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px">{{ p.itemCount }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#a9b1c2">{{ p.subtotal }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#a9b1c2">{{ p.shipping }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#a9b1c2">{{ p.vat }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:600">{{ p.total }}</div>
+                  <div><span style="{{ p.statusChip }}">{{ p.statusLabel }}</span></div>
+                  <div style="{{ p.refundStyle }}">{{ p.refund }}</div>
+                </div>
+                <sc-if value="{{ p.expanded }}" hint-placeholder-val="{{ false }}">
+                  <div style="background:#10141e;padding:10px 16px 12px 40px;display:flex;flex-direction:column;gap:7px;border-top:1px solid #1c2230">
+                    <sc-for list="{{ p.lines }}" as="l" hint-placeholder-count="2">
+                      <div style="display:flex;align-items:center;gap:12px;font-size:12px">
+                        <span style="width:26px;height:26px;border-radius:8px;background:repeating-linear-gradient(135deg,#1e2534 0 5px,#242c3e 5px 10px)"></span>
+                        <span style="flex:1;color:#c9d0e0">{{ l.title }}</span>
+                        <span style="color:#7a8296;font-family:'JetBrains Mono',monospace;font-size:11px">{{ l.size }}</span>
+                        <span style="font-family:'JetBrains Mono',monospace;color:#a9b1c2">{{ l.price }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </sc-if>
+              </div>
+            </sc-for>
+           </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showSales }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:11px">
+          <div style="display:flex;align-items:center;gap:10px">
+            <button onClick="{{ toggleGrouping }}" style="{{ groupBtnStyle }}">{{ groupBtnLabel }}</button>
+            <div style="flex:1"></div>
+            <span style="font-size:11.5px;color:#7a8296">{{ salesSummary }}</span>
+          </div>
+          <sc-for list="{{ saleGroups }}" as="g" hint-placeholder-count="1">
+            <div style="border:1px solid #1f2532;border-radius:18px;background:#141824;overflow:hidden">
+              <sc-if value="{{ g.showHeader }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;align-items:center;gap:10px;padding:10px 15px;background:#171d2a;border-bottom:1px solid #1f2532">
+                  <span style="font-size:12.5px;font-weight:700">{{ g.name }}</span>
+                  <span style="font-size:11px;color:#7a8296">{{ g.count }} sales</span>
+                  <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:12px;color:#8d94a6">payout {{ g.payout }}</span>
+                  <span style="{{ g.profitStyle }}">{{ g.profit }}</span>
+                </div>
+              </sc-if>
+             <div style="overflow-x:auto;max-width:100%">
+              <div style="{{ salesHeadStyle }}">
+                <div>Item</div><div>Marketplace</div><div>Sold</div><div style="text-align:right">Gross</div><div style="text-align:right">Fees</div><div style="text-align:right">Shipping</div><div style="text-align:right">VAT</div><div style="text-align:right">Payout</div><div style="text-align:right">Profit</div><div style="text-align:right">Margin</div>
+              </div>
+              <sc-for list="{{ g.rows }}" as="s" hint-placeholder-count="5">
+                <div style="{{ s.style }}" style-hover="background:#181e2b">
+                  <div style="font-weight:600;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.item }}</div>
+                  <div style="font-size:12px;color:#a9b1c2">{{ s.marketplace }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8d94a6">{{ s.soldAt }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#a9b1c2">{{ s.gross }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#8d94a6">{{ s.fees }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#8d94a6">{{ s.shipping }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#8d94a6">{{ s.vat }}</div>
+                  <div style="text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px">{{ s.payout }}</div>
+                  <div style="{{ s.profitStyle }}">{{ s.profit }}</div>
+                  <div style="{{ s.marginStyle }}">{{ s.margin }}</div>
+                </div>
+              </sc-for>
+             </div>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showShipments }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;gap:13px;align-items:flex-start">
+          <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:11px">
+            <div style="display:flex;gap:7px;flex-wrap:wrap">
+              <sc-for list="{{ shipFilters }}" as="f" hint-placeholder-count="4">
+                <button onClick="{{ f.go }}" style="{{ f.style }}">{{ f.label }} <span style="opacity:.6;font-family:'JetBrains Mono',monospace">{{ f.count }}</span></button>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #1f2532;border-radius:18px;background:#141824;overflow:hidden">
+             <div style="overflow-x:auto;max-width:100%">
+              <div style="{{ shipHeadStyle }}"><div>Dir</div><div>Carrier</div><div>Tracking</div><div>Linked to</div><div>Status</div><div>Last movement</div><div>Expected</div></div>
+              <sc-for list="{{ shipments }}" as="s" hint-placeholder-count="8">
+                <div onClick="{{ s.open }}" style="{{ s.style }}" style-hover="background:#181e2b">
+                  <div><span style="{{ s.dirStyle }}">{{ s.dir }}</span></div>
+                  <div style="display:flex;align-items:center;gap:7px"><span style="{{ s.carrierMark }}">{{ s.carrierAbbr }}</span><span style="font-size:12px;color:#c9d0e0">{{ s.carrier }}</span></div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#8d94a6">{{ s.tracking }}</div>
+                  <div style="font-size:12px;color:#a9b1c2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{{ s.linked }}</div>
+                  <div><span style="{{ s.statusChip }}"><span style="{{ s.statusDot }}"></span>{{ s.statusLabel }}</span></div>
+                  <div style="{{ s.moveStyle }}">{{ s.lastMovement }}</div>
+                  <div style="{{ s.expectedStyle }}">{{ s.expected }}</div>
+                </div>
+              </sc-for>
+             </div>
+            </div>
+          </div>
+          <sc-if value="{{ shipDetail }}" hint-placeholder-val="{{ false }}">
+            <aside style="width:320px;flex:none;border:1px solid #1f2532;border-radius:18px;background:#141824;padding:15px 16px;display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;align-items:flex-start;gap:10px">
+                <div style="display:flex;flex-direction:column;gap:3px;min-width:0">
+                  <div style="font-size:13px;font-weight:700">{{ shipDetail.carrier }}</div>
+                  <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#8d94a6">{{ shipDetail.tracking }}</div>
+                </div>
+                <button onClick="{{ closeShip }}" style="margin-left:auto;border:0;background:transparent;color:#6f7789;font-size:15px;cursor:pointer">×</button>
+              </div>
+              <sc-if value="{{ shipDetail.warning }}" hint-placeholder-val="{{ false }}">
+                <div style="border:1px solid #40303a;background:rgba(232,106,160,.10);border-radius:14px;padding:10px 11px;display:flex;flex-direction:column;gap:5px">
+                  <div style="font-size:11.5px;font-weight:700;color:#f0a8c0">{{ shipDetail.warningTitle }}</div>
+                  <div style="font-size:11.5px;color:#c8a9b6;line-height:1.45">{{ shipDetail.warning }}</div>
+                  <div style="display:flex;gap:6px;margin-top:3px">
+                    <button style="border:1px solid #4a3742;background:transparent;color:#f0a8c0;border-radius:999px;padding:4px 10px;font-size:11px;font-family:inherit;cursor:pointer">Open claim</button>
+                    <button style="border:1px solid #4a3742;background:transparent;color:#f0a8c0;border-radius:999px;padding:4px 10px;font-size:11px;font-family:inherit;cursor:pointer">Email buyer</button>
+                  </div>
+                </div>
+              </sc-if>
+              <div style="font-size:10.5px;color:#7a8296;letter-spacing:.05em">CARRIER EVENTS</div>
+              <sc-for list="{{ shipDetail.events }}" as="e" hint-placeholder-count="4">
+                <div style="display:flex;gap:11px">
+                  <div style="display:flex;flex-direction:column;align-items:center;width:10px;flex:none">
+                    <span style="{{ e.dot }}"></span><span style="flex:1;width:1px;background:#242b3a"></span>
+                  </div>
+                  <div style="display:flex;flex-direction:column;gap:2px;min-width:0;padding-bottom:12px">
+                    <div style="font-size:12px;font-weight:600;color:#d8dde8">{{ e.description }}</div>
+                    <div style="font-size:10.5px;color:#7a8296;font-family:'JetBrains Mono',monospace">{{ e.at }} · {{ e.location }}</div>
+                  </div>
+                </div>
+              </sc-for>
+            </aside>
+          </sc-if>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showReview }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:11px;max-width:960px">
+          <sc-if value="{{ reviewEmpty }}" hint-placeholder-val="{{ false }}">
+            <div style="margin:70px auto;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px;max-width:420px">
+              <div style="width:56px;height:56px;border-radius:20px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);display:flex;align-items:center;justify-content:center;color:#0b0d12;font-size:24px;font-weight:800">✓</div>
+              <h2 style="margin:0;font-size:18px;font-weight:700;letter-spacing:-.02em">Queue clear</h2>
+              <p style="margin:0;font-size:12.5px;line-height:1.6;color:#8d94a6">Every email from the last sync was recognised and filed. Nothing was dropped.</p>
+            </div>
+          </sc-if>
+          <sc-for list="{{ reviewItems }}" as="m" hint-placeholder-count="4">
+            <div style="border:1px solid #1f2532;border-radius:18px;background:#141824;padding:14px 16px;display:flex;flex-direction:column;gap:9px">
+              <div style="display:flex;align-items:baseline;gap:10px">
+                <span style="font-size:12.5px;font-weight:700">{{ m.from }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f7789">{{ m.address }}</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:11px;color:#7a8296">{{ m.received }}</span>
+              </div>
+              <div style="font-size:13px;font-weight:600;color:#dfe4ee">{{ m.subject }}</div>
+              <div style="font-size:12px;line-height:1.55;color:#8d94a6;background:#10141e;border:1px solid #1c2230;border-radius:12px;padding:9px 11px">{{ m.preview }}</div>
+              <div style="display:flex;gap:7px;align-items:center">
+                <button onClick="{{ m.record }}" style="border:0;background:#5b8cff;color:#0b1020;border-radius:999px;padding:6px 13px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer">Record manually</button>
+                <button onClick="{{ m.ignore }}" style="border:1px solid #2b3346;background:transparent;color:#a9b1c2;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Mark irrelevant</button>
+                <button style="border:1px solid #2b3346;background:transparent;color:#a9b1c2;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Export .eml</button>
+                <span style="margin-left:auto;font-size:11px;color:#5f6779">no parser matched this sender</span>
+              </div>
+              <sc-if value="{{ m.recording }}" hint-placeholder-val="{{ false }}">
+                <div style="border-top:1px solid #1c2230;padding-top:11px;display:grid;grid-template-columns:repeat(4,1fr);gap:9px">
+                  <sc-for list="{{ m.fields }}" as="fl" hint-placeholder-count="4">
+                    <label style="display:flex;flex-direction:column;gap:4px">
+                      <span style="font-size:10.5px;color:#7a8296;letter-spacing:.04em">{{ fl.label }}</span>
+                      <input placeholder="{{ fl.placeholder }}" style="border:1px solid #262d3d;background:#10141e;border-radius:9px;padding:7px 9px;color:#e8eaf0;font-family:inherit;font-size:12px;outline:none"/>
+                    </label>
+                  </sc-for>
+                  <div style="grid-column:1 / -1;display:flex;gap:7px">
+                    <button onClick="{{ m.record }}" style="border:0;background:#6ee7d4;color:#0d1a18;border-radius:999px;padding:6px 13px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer">Save record</button>
+                    <button onClick="{{ m.record }}" style="border:0;background:transparent;color:#7a8296;font-size:11.5px;font-family:inherit;cursor:pointer">Cancel</button>
+                  </div>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showReports }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:13px;max-width:1020px">
+          <div style="display:flex;gap:3px;background:#10141e;border:1px solid #232a38;border-radius:999px;padding:3px;width:fit-content">
+            <sc-for list="{{ reportTabs }}" as="t" hint-placeholder-count="3">
+              <button onClick="{{ t.go }}" style="{{ t.style }}">{{ t.label }}</button>
+            </sc-for>
+          </div>
+          <div style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:13px">
+            <div style="display:flex;align-items:baseline;gap:12px">
+              <h2 style="margin:0;font-size:13.5px;font-weight:700">{{ report.title }}</h2>
+              <span style="font-size:11.5px;color:#7a8296">{{ report.sub }}</span>
+              <button style="margin-left:auto;border:1px solid #2b3346;background:#171d2a;color:#c9d0e0;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Export CSV</button>
+            </div>
+            <div style="display:flex;gap:26px;flex-wrap:wrap">
+              <sc-for list="{{ report.totals }}" as="t" hint-placeholder-count="3">
+                <div style="display:flex;flex-direction:column;gap:3px">
+                  <div style="font-size:10.5px;color:#7a8296;letter-spacing:.04em">{{ t.label }}</div>
+                  <div style="{{ t.style }}">{{ t.value }}</div>
+                </div>
+              </sc-for>
+            </div>
+            <div style="border:1px solid #1c2230;border-radius:14px;overflow:hidden">
+              <div style="{{ reportHeadStyle }}">
+                <sc-for list="{{ report.cols }}" as="c" hint-placeholder-count="4">
+                  <div style="{{ c.style }}">{{ c.label }}</div>
+                </sc-for>
+              </div>
+              <sc-for list="{{ report.rows }}" as="r" hint-placeholder-count="6">
+                <div style="{{ reportRowStyle }}">
+                  <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="4">
+                    <div style="{{ c.style }}">{{ c.value }}</div>
+                  </sc-for>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ showSettings }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-direction:column;gap:13px;max-width:920px">
+          <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:11px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <h2 style="margin:0;font-size:13.5px;font-weight:700">Email accounts</h2>
+              <span style="font-size:11.5px;color:#7a8296">everything downstream depends on these</span>
+              <button onClick="{{ toggleAddAccount }}" style="margin-left:auto;border:0;background:#5b8cff;color:#0b1020;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer">{{ addAccountLabel }}</button>
+            </div>
+            <sc-for list="{{ accounts }}" as="a" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid #1f2532;border-radius:14px;background:#10141e">
+                <span style="{{ a.dot }}"></span>
+                <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
+                  <span style="font-size:12.5px;font-weight:600">{{ a.address }}</span>
+                  <span style="font-size:11px;color:#7a8296">{{ a.provider }} · {{ a.host }}</span>
+                </div>
+                <span style="margin-left:auto;font-size:11.5px;color:#8d94a6;font-family:'JetBrains Mono',monospace">{{ a.lastSync }}</span>
+                <span style="{{ a.chip }}">{{ a.status }}</span>
+                <button style="border:1px solid #2b3346;background:transparent;color:#a9b1c2;border-radius:999px;padding:5px 11px;font-size:11px;font-family:inherit;cursor:pointer">Test</button>
+              </div>
+            </sc-for>
+            <sc-if value="{{ addingAccount }}" hint-placeholder-val="{{ false }}">
+              <div style="border:1px solid #2b3a5e;border-radius:16px;background:rgba(91,140,255,.06);padding:14px;display:flex;flex-direction:column;gap:11px">
+                <div style="display:flex;gap:6px;flex-wrap:wrap">
+                  <sc-for list="{{ providers }}" as="p" hint-placeholder-count="7">
+                    <button onClick="{{ p.go }}" style="{{ p.style }}">{{ p.label }}</button>
+                  </sc-for>
+                </div>
+                <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px">
+                  <sc-for list="{{ accountFields }}" as="f" hint-placeholder-count="4">
+                    <label style="display:flex;flex-direction:column;gap:4px">
+                      <span style="font-size:10.5px;color:#7a8296;letter-spacing:.04em">{{ f.label }}</span>
+                      <input value="{{ f.value }}" placeholder="{{ f.placeholder }}" onChange="{{ noop }}" style="border:1px solid #262d3d;background:#10141e;border-radius:9px;padding:8px 9px;color:#e8eaf0;font-family:'JetBrains Mono',monospace;font-size:12px;outline:none"/>
+                    </label>
+                  </sc-for>
+                </div>
+                <sc-if value="{{ needsAppPassword }}" hint-placeholder-val="{{ false }}">
+                  <div style="display:flex;gap:9px;align-items:flex-start;border:1px solid #4a4030;background:rgba(247,160,138,.10);border-radius:12px;padding:9px 11px">
+                    <span style="width:6px;height:6px;border-radius:50%;background:#f7a08a;margin-top:6px;flex:none"></span>
+                    <span style="font-size:11.5px;line-height:1.5;color:#e3c9bd">{{ appPasswordNote }}</span>
+                  </div>
+                </sc-if>
+                <div style="display:flex;gap:7px;align-items:center">
+                  <button onClick="{{ testConnection }}" style="border:1px solid #2b3a5e;background:#131a2a;color:#b9cdff;border-radius:999px;padding:7px 13px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer">Test connection</button>
+                  <button style="border:0;background:#5b8cff;color:#0b1020;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer">Add account</button>
+                  <span style="{{ testResultStyle }}">{{ testResult }}</span>
+                </div>
+              </div>
+            </sc-if>
+          </section>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:13px;align-items:start">
+            <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:11px">
+              <h2 style="margin:0;font-size:13.5px;font-weight:700">Currency &amp; VAT</h2>
+              <sc-for list="{{ vatFields }}" as="f" hint-placeholder-count="3">
+                <div style="display:flex;align-items:center;gap:10px">
+                  <span style="font-size:12px;color:#a9b1c2;flex:1">{{ f.label }}</span>
+                  <span style="font-family:'JetBrains Mono',monospace;font-size:12px;background:#10141e;border:1px solid #262d3d;border-radius:9px;padding:6px 11px">{{ f.value }}</span>
+                </div>
+              </sc-for>
+            </section>
+            <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:11px">
+              <h2 style="margin:0;font-size:13.5px;font-weight:700">Tracking API</h2>
+              <div style="display:flex;align-items:center;gap:10px">
+                <span style="font-size:12px;color:#a9b1c2;flex:1">Quota used this month</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;color:#c9d0e0">3 412 / 10 000</span>
+              </div>
+              <div style="height:5px;border-radius:5px;background:#1d2331;overflow:hidden"><div style="width:34%;height:100%;background:linear-gradient(90deg,#6ee7d4,#5b8cff)"></div></div>
+              <button style="align-self:flex-start;border:1px solid #2b3346;background:#171d2a;color:#c9d0e0;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Test credentials</button>
+            </section>
+          </div>
+
+          <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:10px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <h2 style="margin:0;font-size:13.5px;font-weight:700">Discord notifications</h2>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f7789">discord.com/api/webhooks/····</span>
+              <button style="margin-left:auto;border:1px solid #2b3346;background:#171d2a;color:#c9d0e0;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Send test message</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:0 24px">
+              <sc-for list="{{ notifications }}" as="n" hint-placeholder-count="8">
+                <div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid #1c2230">
+                  <span style="font-size:12px;color:#c9d0e0;flex:1">{{ n.label }}</span>
+                  <button onClick="{{ n.toggle }}" style="{{ n.trackStyle }}"><span style="{{ n.knobStyle }}"></span></button>
+                </div>
+              </sc-for>
+            </div>
+          </section>
+
+          <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:8px">
+            <div style="display:flex;align-items:baseline;gap:10px">
+              <h2 style="margin:0;font-size:13.5px;font-weight:700">Parsers</h2>
+              <span style="font-size:11.5px;color:#7a8296">read-only · answers “why was this email not picked up”</span>
+            </div>
+            <sc-for list="{{ parsers }}" as="p" hint-placeholder-count="5">
+              <div style="display:flex;align-items:center;gap:12px;padding:7px 0;border-top:1px solid #1c2230">
+                <span style="font-size:12.5px;font-weight:600;width:130px">{{ p.retailer }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#7a8296;flex:1">{{ p.match }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#a9b1c2">{{ p.parsed }}</span>
+              </div>
+            </sc-for>
+          </section>
+        </div>
+      </sc-if>
+    </div>
+  </main>
+
+  <sc-if value="{{ drawer }}" hint-placeholder-val="{{ false }}">
+    <aside style="position:fixed;top:14px;right:14px;bottom:14px;width:500px;background:#12161f;border:1px solid #232a38;border-radius:22px;box-shadow:-24px 0 60px rgba(0,0,0,.5);display:flex;flex-direction:column;z-index:40;overflow:hidden">
+      <div style="flex:none;display:flex;gap:13px;padding:16px 18px;border-bottom:1px solid #1c2230;align-items:flex-start">
+        <div style="width:52px;height:52px;border-radius:15px;background:repeating-linear-gradient(135deg,#1e2534 0 6px,#252d40 6px 12px);flex:none"></div>
+        <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+          <div style="font-size:14.5px;font-weight:700;letter-spacing:-.01em">{{ drawer.title }}</div>
+          <div style="font-size:11.5px;color:#7a8296">{{ drawer.subtitle }}</div>
+          <div style="display:flex;gap:7px;margin-top:3px;align-items:center">
+            <span style="{{ drawer.statusChip }}"><span style="{{ drawer.statusDot }}"></span>{{ drawer.statusLabel }}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#6f7789">{{ drawer.sku }}</span>
+          </div>
+        </div>
+        <button onClick="{{ closeDrawer }}" style="margin-left:auto;border:1px solid #262d3d;background:#171d2a;color:#8d94a6;border-radius:10px;width:28px;height:28px;cursor:pointer;font-size:13px">×</button>
+      </div>
+      <div style="flex:1;min-height:0;overflow:auto;padding:15px 18px;display:flex;flex-direction:column;gap:12px">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div style="border:1px solid #1f2532;border-radius:16px;background:#141824;padding:12px 13px;display:flex;flex-direction:column;gap:7px">
+            <div style="font-size:10px;color:#7a8296;letter-spacing:.06em">PURCHASE</div>
+            <sc-for list="{{ drawer.purchase }}" as="p" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+                <span style="color:#8d94a6;flex:1">{{ p.label }}</span>
+                <span style="font-family:'JetBrains Mono',monospace;color:#d8dde8">{{ p.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="border:1px solid #1f2532;border-radius:16px;background:#141824;padding:12px 13px;display:flex;flex-direction:column;gap:7px">
+            <div style="font-size:10px;color:#7a8296;letter-spacing:.06em">{{ drawer.rightTitle }}</div>
+            <sc-for list="{{ drawer.right }}" as="p" hint-placeholder-count="4">
+              <div style="display:flex;align-items:center;gap:8px;font-size:12px">
+                <span style="color:#8d94a6;flex:1">{{ p.label }}</span>
+                <span style="{{ p.style }}">{{ p.value }}</span>
+              </div>
+            </sc-for>
+          </div>
+        </div>
+        <div style="border:1px solid #1f2532;border-radius:16px;background:#141824;padding:12px 13px;display:flex;flex-direction:column;gap:9px">
+          <div style="font-size:10px;color:#7a8296;letter-spacing:.06em">SHIPMENTS</div>
+          <sc-for list="{{ drawer.shipments }}" as="s" hint-placeholder-count="2">
+            <div style="display:flex;align-items:center;gap:9px">
+              <span style="{{ s.dirStyle }}">{{ s.dir }}</span>
+              <span style="font-size:12px;color:#c9d0e0">{{ s.carrier }}</span>
+              <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6f7789">{{ s.tracking }}</span>
+              <span style="{{ s.statusChip }}">{{ s.statusLabel }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="border:1px solid #1f2532;border-radius:16px;background:#141824;padding:13px 14px;display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;align-items:baseline;gap:8px">
+            <div style="font-size:10px;color:#7a8296;letter-spacing:.06em">EVENT TIMELINE</div>
+            <span style="font-size:10.5px;color:#5f6779">each entry links to the email it came from</span>
+          </div>
+          <sc-for list="{{ drawer.timeline }}" as="t" hint-placeholder-count="5">
+            <div style="display:flex;gap:11px">
+              <div style="display:flex;flex-direction:column;align-items:center;width:10px;flex:none">
+                <span style="{{ t.dot }}"></span><span style="flex:1;width:1px;background:#242b3a"></span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px;min-width:0;padding-bottom:13px;flex:1">
+                <div style="display:flex;align-items:baseline;gap:8px">
+                  <span style="font-size:12px;font-weight:600;color:#d8dde8">{{ t.title }}</span>
+                  <span style="{{ t.tagStyle }}">{{ t.tag }}</span>
+                  <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6f7789">{{ t.at }}</span>
+                </div>
+                <div style="font-size:11.5px;color:#8d94a6;line-height:1.45">{{ t.detail }}</div>
+                <div style="display:flex;gap:8px;align-items:center">
+                  <a href="#" style="font-size:11px">{{ t.source }}</a>
+                  <span style="font-size:11px;color:#4f5768">·</span>
+                  <button style="border:0;background:transparent;color:#7a8296;font-size:11px;font-family:inherit;cursor:pointer;padding:0">Override</button>
+                </div>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="flex:none;display:flex;gap:8px;padding:13px 18px;border-top:1px solid #1c2230;background:#10141e">
+        <button style="border:0;background:#5b8cff;color:#0b1020;border-radius:999px;padding:8px 15px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer">Mark as listed</button>
+        <button style="border:1px solid #2b3346;background:transparent;color:#c9d0e0;border-radius:999px;padding:8px 15px;font-size:12px;font-family:inherit;cursor:pointer">Edit</button>
+        <button onClick="{{ askDelete }}" style="margin-left:auto;border:1px solid #43303a;background:transparent;color:#e88ba8;border-radius:999px;padding:8px 15px;font-size:12px;font-family:inherit;cursor:pointer">Delete item</button>
+      </div>
+      <sc-if value="{{ confirming }}" hint-placeholder-val="{{ false }}">
+        <div style="position:absolute;left:0;right:0;bottom:0;padding:14px 18px;background:#1a1219;border-top:1px solid #43303a;display:flex;align-items:center;gap:12px">
+          <span style="font-size:12px;color:#e8c3cf;flex:1">Delete this item and its links to purchase and sale? This cannot be undone.</span>
+          <button onClick="{{ cancelDelete }}" style="border:1px solid #3a2f37;background:transparent;color:#c9b3bb;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Cancel</button>
+          <button onClick="{{ cancelDelete }}" style="border:0;background:#e86aa0;color:#1a0d14;border-radius:999px;padding:6px 13px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer">Delete</button>
+        </div>
+      </sc-if>
+    </aside>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{}">
+const SYM = { EUR: '\u20ac', USD: '$', GBP: '\u00a3' };
+const money = (m) => m == null ? '\u2014' : (m.minor < 0 ? '-' : '') + SYM[m.currency] + (Math.abs(m.minor) / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const eur = (n) => ({ minor: Math.round(n * 100), currency: 'EUR' });
+
+const STATUS = {
+  incoming: { label: 'Incoming', hue: 285, step: 1 },
+  in_stock: { label: 'In stock', hue: 250, step: 2 },
+  listed: { label: 'Listed', hue: 225, step: 3 },
+  sold: { label: 'Sold', hue: 195, step: 4 },
+  shipped_to_buyer: { label: 'Shipped', hue: 170, step: 5 },
+  delivered: { label: 'Delivered', hue: 148, step: 6 },
+  cancelled: { label: 'Cancelled', hue: 265, step: 0, muted: true },
+  returned: { label: 'Returned', hue: 25, step: 0, exception: true }
+};
+const sColor = (k) => STATUS[k].muted ? 'oklch(0.60 0.015 265)' : `oklch(0.76 0.13 ${STATUS[k].hue})`;
+const chip = (k) => `display:inline-flex;align-items:center;gap:6px;padding:3px 9px 3px 7px;border-radius:999px;font-size:11px;font-weight:600;white-space:nowrap;color:${sColor(k)};background:color-mix(in oklab, ${sColor(k)} 14%, transparent);border:1px solid color-mix(in oklab, ${sColor(k)} 30%, transparent)${STATUS[k].exception || STATUS[k].muted ? ';border-style:dashed' : ''}`;
+const sdot = (k) => `width:6px;height:6px;border-radius:${STATUS[k].exception || STATUS[k].muted ? '1px;transform:rotate(45deg)' : '50%'};background:${sColor(k)};flex:none`;
+
+const ITEMS = [
+  ['Nike Dunk Low Panda','Nike','EU 43','new','listed',109,165,'2026-06-14',65,'Shelf A2','Snipes','DUNK-PANDA-43'],
+  ['Jordan 4 Retro Military Black','Jordan','EU 44','new','in_stock',240,null,'2026-07-02',47,'Shelf A3','Nike.com','AJ4-MIL-44'],
+  ['Stone Island Ghost Hoodie','Stone Island','L','new','sold',290,420,'2026-05-21',89,'Shelf B1','END.','SI-GHOST-L'],
+  ['New Balance 990v6 Grey','New Balance','EU 42','new','incoming',185,null,'2026-08-11',7,'\u2014','Overkill','NB990-GR-42'],
+  ['Supreme Box Logo Tee FW25','Supreme','M','new','listed',145,260,'2026-03-08',163,'Shelf C2','Supreme EU','SUP-BOGO-M'],
+  ['Yeezy Slide Onyx','adidas','EU 45','new','shipped_to_buyer',78,120,'2026-06-29',50,'Shipped','adidas','YZY-ONYX-45'],
+  ['Salomon XT-6 Black','Salomon','EU 41','new','delivered',155,210,'2026-04-17',123,'Shipped','Slam Jam','XT6-BLK-41'],
+  ['Arc\u2019teryx Beta LT Jacket','Arc\u2019teryx','M','used','in_stock',310,null,'2026-07-19',30,'Shelf B3','Vinted','ARC-BETA-M'],
+  ['Travis Scott x Fragment Low','Jordan','EU 43','new','returned',620,890,'2026-02-11',189,'Shelf D1','StockX','TS-FRAG-43'],
+  ['Corteiz Alcatraz Cargos','Corteiz','L','new','listed',130,215,'2026-05-30',80,'Shelf C1','Corteiz','CRTZ-CARGO-L'],
+  ['ASICS Gel-Kayano 14 Cream','ASICS','EU 44','new','in_stock',118,null,'2026-08-01',17,'Shelf A1','Asphaltgold','GK14-CRM-44'],
+  ['Eras Tour Amsterdam \u00d72','Ticketmaster','\u2014','new','sold',240,470,'2026-06-05',74,'Digital','Ticketmaster','TM-AMS-2'],
+  ['Pok\u00e9mon 151 Booster Box','Pok\u00e9mon','\u2014','new','listed',165,245,'2026-07-08',41,'Shelf E1','Bol.com','PKM-151-BB'],
+  ['Nike Tech Fleece Set Grey','Nike','XL','new','cancelled',175,null,'2026-08-09',9,'\u2014','JD Sports','NTF-GRY-XL'],
+  ['Denim Tears Sweatpants','Denim Tears','M','new','incoming',210,null,'2026-08-13',5,'\u2014','SSENSE','DT-SWP-M'],
+  ['Submariner 124060 full set','Rolex','\u2014','used','in_stock',1450,null,'2026-01-22',209,'Safe','Chrono24','RLX-SUB-124060']
+].map((r, i) => ({ id: 'itm_' + (100 + i), title: r[0], brand: r[1], size: r[2], condition: r[3], status: r[4], purchasePrice: eur(r[5]), listedPrice: r[6] == null ? null : eur(r[6]), purchasedAt: r[7], daysHeld: r[8], location: r[9], retailer: r[10], sku: r[11] }));
+
+const PURCHASES = [
+  ['Snipes','SNP-88412','2026-06-14',1,109,0,22.89,109,'delivered',null],
+  ['Nike.com','C0092817364','2026-07-02',2,425,0,89.25,425,'delivered',null],
+  ['JD Sports','JD-7742901','2026-08-09',1,175,4.95,37.09,179.95,'cancelled',179.95],
+  ['SSENSE','SS-2291043','2026-08-13',1,210,12,46.62,222,'shipped',null],
+  ['StockX','SX-40118822','2026-02-11',1,620,18,0,638,'refunded',null],
+  ['Overkill','OVK-33218','2026-08-11',1,185,5.9,40.05,190.9,'confirmed',null],
+  ['END.','END-9928172','2026-05-21',1,290,0,60.9,290,'partially_refunded',42.5]
+].map((r, i) => ({ id: 'pur_' + (10 + i), retailer: r[0], ref: r[1], date: r[2], itemCount: r[3], subtotal: eur(r[4]), shipping: eur(r[5]), vat: eur(r[6]), total: eur(r[7]), status: r[8], refundOutstanding: r[9] == null ? null : eur(r[9]) }));
+
+const PSTATUS = { pending: ['Pending', 'oklch(0.68 0.02 265)'], confirmed: ['Confirmed', 'oklch(0.76 0.11 225)'], shipped: ['Shipped', 'oklch(0.78 0.11 195)'], delivered: ['Delivered', 'oklch(0.78 0.12 148)'], cancelled: ['Cancelled', 'oklch(0.62 0.015 265)'], refunded: ['Refunded', 'oklch(0.74 0.10 60)'], partially_refunded: ['Part. refunded', 'oklch(0.74 0.12 40)'] };
+
+const SALES = [
+  ['Stone Island Ghost Hoodie','Vinted','2026-08-14',420,21,6.95,72.9,392.05,102.05],
+  ['Eras Tour Amsterdam \u00d72','TicketSwap','2026-08-12',470,28.2,0,0,441.8,201.8],
+  ['Yeezy Slide Onyx','StockX','2026-08-10',120,14.4,8.5,20.83,97.1,19.1],
+  ['Salomon XT-6 Black','eBay','2026-08-04',210,25.2,7.2,36.45,177.6,22.6],
+  ['Nike Dunk Low Panda','StockX','2026-07-28',148,17.8,8.5,25.68,121.7,12.7],
+  ['Supreme Box Logo Tee FW25','eBay','2026-07-19',168,20.2,7.2,29.16,140.6,-4.4],
+  ['Pok\u00e9mon 151 Booster Box','Marktplaats','2026-07-11',215,0,6.95,37.32,208.05,43.05],
+  ['Jordan 4 Retro Military','Vinted','2026-06-30',268,13.4,6.95,46.51,247.65,-12.35]
+].map((r, i) => ({ id: 'sal_' + i, item: r[0], marketplace: r[1], soldAt: r[2], gross: eur(r[3]), fees: eur(r[4]), shipping: eur(r[5]), vat: eur(r[6]), payout: eur(r[7]), profit: eur(r[8]), margin: (r[8] / r[3]) * 100 }));
+
+const SHIPMENTS = [
+  ['outbound','PostNL','3SBTC0294817263','Stone Island Ghost Hoodie','exception','2026-08-13','2026-08-15',5],
+  ['inbound','DHL','JVGL0099281736221','SSENSE \u00b7 SS-2291043','in_transit','2026-08-16','2026-08-19',2],
+  ['outbound','DPD','05512847362910','Yeezy Slide Onyx','in_transit','2026-08-08','2026-08-12',10],
+  ['inbound','GLS','81726354091','Overkill \u00b7 OVK-33218','pending',null,'2026-08-20',null],
+  ['outbound','UPS','1Z9V88170392817462','Salomon XT-6 Black','delivered','2026-08-06','2026-08-06',12],
+  ['inbound','PostNL','3SPOST772819264','Nike.com \u00b7 C0092817364','delivered','2026-07-05','2026-07-05',44],
+  ['outbound','DHL','JVGL0099277718264','Pok\u00e9mon 151 Booster Box','out_for_delivery','2026-08-18','2026-08-18',0],
+  ['inbound','DPD','05512800012736','JD Sports \u00b7 JD-7742901','unknown',null,null,null]
+].map((r, i) => ({ id: 'shp_' + i, direction: r[0], carrier: r[1], tracking: r[2], linked: r[3], status: r[4], lastMovementAt: r[5], expectedDeliveryAt: r[6], daysSinceMovement: r[7] }));
+
+const SHIP_STATUS = { pending: ['Pending', 'oklch(0.66 0.02 265)'], in_transit: ['In transit', 'oklch(0.76 0.12 232)'], out_for_delivery: ['Out for delivery', 'oklch(0.78 0.12 178)'], delivered: ['Delivered', 'oklch(0.78 0.12 148)'], exception: ['Exception', 'oklch(0.70 0.17 18)'], unknown: ['Unknown', 'oklch(0.74 0.11 65)'] };
+const CARRIER = { DHL: ['DH', 'oklch(0.80 0.14 90)'], PostNL: ['PN', 'oklch(0.72 0.13 40)'], DPD: ['DP', 'oklch(0.72 0.12 330)'], GLS: ['GL', 'oklch(0.74 0.12 145)'], UPS: ['UP', 'oklch(0.68 0.08 65)'] };
+
+const REVIEW = [
+  { from: 'Zalando', address: 'noreply@zalando.nl', subject: 'Je pakket is onderweg \u2014 bestelling 10029182', received: '18 Aug 09:12', preview: 'Goed nieuws! Je bestelling is verzonden met DHL. Track & Trace: JVGL00992817362\u2026' },
+  { from: 'PayPal', address: 'service@paypal.com', subject: 'You sent a payment of $220.00 USD to KicksVault LLC', received: '17 Aug 22:41', preview: 'Transaction ID 8HK92817LK029183M. This charge appears on your statement as PAYPAL *KICKSVAULT.' },
+  { from: 'Chrono24', address: 'no-reply@chrono24.com', subject: 'Your offer was accepted \u2014 Submariner 124060', received: '17 Aug 14:03', preview: 'The seller accepted your offer of \u20ac11,450. Please complete payment within 48 hours via Chrono24 Trusted Checkout.' },
+  { from: 'PostNL', address: 'noreply@postnl.nl', subject: 'Bezorging niet gelukt \u2014 3SBTC0294817263', received: '16 Aug 18:27', preview: 'We hebben je pakket niet kunnen bezorgen. Het pakket ligt klaar bij PostNL punt Ferdinand Bolstraat 12.' }
+];
+
+const NAV = ['Dashboard', 'Inventory', 'Purchases', 'Sales', 'Shipments', 'Review', 'Reports', 'Settings'];
+const NAV_HUE = [178, 225, 285, 148, 40, 350, 260, 220];
+
+class Component extends DCLogic {
+  state = {
+    screen: 'Dashboard', period: 'This month', dataState: 'ready', query: '', statusFilter: 'all',
+    sort: { col: 'daysHeld', dir: 'desc' }, selected: [], dense: true, openItem: null, confirming: false,
+    expandedPurchase: null, refundOnly: false, groupSales: true, shipFilter: 'attention', openShip: 'shp_0',
+    reviewTab: 'pl', recording: null, addingAccount: false, provider: 'Gmail', testResult: '',
+    notifOn: [0, 1, 3, 4, 5, 7], attentionFirst: true, syncState: 'idle'
+  };
+
+  componentDidMount() {
+    this._key = (e) => { if (e.key === 'Escape') this.setState({ openItem: null, confirming: false }); };
+    window.addEventListener('keydown', this._key);
+  }
+  componentWillUnmount() { window.removeEventListener('keydown', this._key); }
+
+  go = (screen) => () => this.setState({ screen, openItem: null });
+
+  filteredItems() {
+    const q = this.state.query.trim().toLowerCase();
+    return ITEMS.filter(i => (this.state.statusFilter === 'all' || i.status === this.state.statusFilter)
+      && (!q || i.title.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q)))
+      .sort((a, b) => {
+        const { col, dir } = this.state.sort, m = dir === 'asc' ? 1 : -1;
+        const va = col === 'purchasePrice' || col === 'listedPrice' ? (a[col] ? a[col].minor : -1) : a[col];
+        const vb = col === 'purchasePrice' || col === 'listedPrice' ? (b[col] ? b[col].minor : -1) : b[col];
+        return (va > vb ? 1 : va < vb ? -1 : 0) * m;
+      });
+  }
+
+  renderVals() {
+    const st = this.state;
+    const S = st.dataState;
+    const rowH = st.dense ? '30px' : '42px';
+    const grid = `display:grid;grid-template-columns:26px 34px minmax(190px,2fr) 96px 60px 118px 84px 84px 84px 62px 84px 96px;gap:10px;align-items:center;padding:0 14px;min-width:1160px`;
+    const purGrid = 'display:grid;grid-template-columns:18px 110px 130px 84px 48px 90px 84px 84px 92px 118px 96px;gap:10px;align-items:center;min-width:1082px';
+    const salesGrid = 'display:grid;grid-template-columns:minmax(180px,2fr) 110px 84px 80px 74px 80px 74px 88px 92px 74px;gap:10px;align-items:center;min-width:1056px';
+    const shipGrid = 'display:grid;grid-template-columns:56px 120px 150px minmax(140px,1fr) 140px 96px 76px;gap:10px;align-items:center;min-width:880px';
+
+    const nav = NAV.map((label, i) => {
+      const on = st.screen === label;
+      return {
+        label, go: this.go(label), badge: label === 'Review' ? REVIEW.length : null,
+        style: `display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;border:0;background:${on ? '#1f2635' : 'transparent'};color:${on ? '#eef1f7' : '#98a0b3'};border-radius:12px;padding:9px 11px;font-family:inherit;font-size:12.5px;font-weight:${on ? 700 : 500};cursor:pointer`,
+        dotStyle: `width:7px;height:7px;border-radius:50%;background:oklch(0.76 0.13 ${NAV_HUE[i]});opacity:${on ? 1 : .45};flex:none`
+      };
+    });
+
+    const syncMap = {
+      idle: { title: 'Synced', detail: 'All 5 accounts \u00b7 4m ago', dotc: 'oklch(0.78 0.12 148)' },
+      syncing: { title: 'Syncing', detail: '3 of 5 accounts \u00b7 cancel', dotc: 'oklch(0.76 0.12 232)', bar: 60 },
+      error: { title: 'Sync failed', detail: 'jasper@web.de \u2014 auth rejected', dotc: 'oklch(0.70 0.17 18)' },
+      never: { title: 'Never synced', detail: 'Connect an account to start', dotc: 'oklch(0.66 0.02 265)' }
+    };
+    const sm = syncMap[S === 'firstrun' ? 'never' : S === 'stale' ? 'error' : st.syncState];
+    const sync = {
+      title: sm.title, detail: sm.detail, showBar: !!sm.bar,
+      dot: `width:7px;height:7px;border-radius:50%;background:${sm.dotc};flex:none;animation:${sm.bar ? 'pulseGlow 1.4s ease-in-out infinite' : 'none'}`,
+      barStyle: `width:${sm.bar || 0}%;height:100%;background:${sm.dotc}`
+    };
+
+    const SUBS = {
+      Dashboard: 'This month at a glance', Inventory: ITEMS.length + ' units held or in flight',
+      Purchases: 'Retailer orders and refunds', Sales: 'Payouts and profit by channel',
+      Shipments: 'Track and trace, both directions', Review: REVIEW.length + ' unrecognised emails waiting',
+      Reports: 'P&L, VAT and currency exposure', Settings: 'Accounts, notifications, parsers'
+    };
+
+    const attention = [
+      { kind: 'Stalled shipment', title: 'PostNL 3SBTC0294 \u2014 no movement 5 days', meta: 'Stone Island Ghost Hoodie \u00b7 outbound', hue: 18, go: this.go('Shipments') },
+      { kind: 'Overdue delivery', title: 'DPD 0551284736 expected 12 Aug', meta: 'Yeezy Slide Onyx \u00b7 6 days late', hue: 40, go: this.go('Shipments') },
+      { kind: 'Refund outstanding', title: 'JD Sports \u20ac179.95 not received', meta: 'Cancelled 9 Aug \u00b7 9 days ago', hue: 350, go: this.go('Purchases') },
+      { kind: 'Review queue', title: '4 emails no parser recognised', meta: 'Oldest 16 Aug', hue: 285, go: this.go('Review') }
+    ].map(a => ({ ...a, dot: `width:7px;height:7px;border-radius:50%;background:oklch(0.74 0.15 ${a.hue});flex:none` }));
+
+    const periods = ['Week', 'Month', 'Quarter', 'Year', 'Custom'].map(p => ({
+      label: p, go: () => this.setState({ period: 'This ' + p.toLowerCase() }),
+      style: `border:0;background:${st.period.includes(p.toLowerCase()) ? '#242c3e' : 'transparent'};color:${st.period.includes(p.toLowerCase()) ? '#e8eaf0' : '#7a8296'};border-radius:999px;padding:5px 11px;font-size:11px;font-weight:600;font-family:inherit;cursor:pointer`
+    }));
+
+    const pts = [18, 26, 21, 34, 30, 41, 38, 47, 44, 52, 49, 56];
+    const sx = (i) => (i / (pts.length - 1)) * 220;
+    const sy = (v) => 54 - (v / 60) * 50;
+    const spark = pts.map((v, i) => `${i ? 'L' : 'M'}${sx(i).toFixed(1)},${sy(v).toFixed(1)}`).join(' ');
+
+    const agingData = [['0-30', 4, 823, 148], ['31-60', 5, 1112, 250], ['61-90', 3, 664, 285], ['90+', 4, 2385, 25]];
+    const totalUnits = 16;
+
+    const d = {
+      netProfit: money(eur(4318.55)), margin: '27.4%', delta: '\u2191 \u20ac612.40 vs last month',
+      breakdown: [{ label: 'REVENUE', value: money(eur(15762.40)) }, { label: 'COST OF GOODS', value: money(eur(10312.85)) }, { label: 'FEES', value: money(eur(1131.00)) }],
+      spark, sparkArea: spark + ' L220,56 L0,56 Z',
+      inbound: '3', inboundStalled: '1 with no movement 7+ days',
+      outbound: '4', outboundStalled: '2 need attention',
+      units: totalUnits, capital: money(eur(4984)),
+      aging: agingData.map(([bucket, units, value, hue]) => {
+        const stalled = bucket === '90+';
+        return {
+          bucket, units, value: money(eur(value)), tag: stalled ? 'stalled capital' : '',
+          go: this.go('Inventory'),
+          style: `text-align:left;cursor:pointer;font-family:inherit;color:inherit;display:flex;flex-direction:column;gap:6px;border:1px solid ${stalled ? '#4a2f3a' : '#212736'};background:${stalled ? 'rgba(232,106,160,.08)' : '#10141e'};border-radius:16px;padding:11px 12px`,
+          tagStyle: stalled ? 'font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#e86aa0' : 'display:none',
+          barStyle: `width:${(units / totalUnits) * 100}%;height:100%;background:oklch(0.76 0.13 ${hue})`
+        };
+      })
+    };
+
+    const counts = { all: ITEMS.length };
+    Object.keys(STATUS).forEach(k => counts[k] = ITEMS.filter(i => i.status === k).length);
+    const fchip = (on, color) => `display:inline-flex;align-items:center;gap:6px;border:1px solid ${on ? color : '#242b3a'};background:${on ? 'color-mix(in oklab,' + color + ' 14%, transparent)' : '#141824'};color:${on ? '#e8eaf0' : '#98a0b3'};border-radius:999px;padding:6px 12px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer`;
+
+    const statusFilters = [{ key: 'all', label: 'All', color: '#5b8cff' }].concat(Object.keys(STATUS).map(k => ({ key: k, label: STATUS[k].label, color: sColor(k) })))
+      .map(f => ({
+        label: f.label, count: counts[f.key], go: () => this.setState({ statusFilter: f.key }),
+        style: fchip(st.statusFilter === f.key, f.color),
+        dot: f.key === 'all' ? 'display:none' : sdot(f.key)
+      }));
+
+    const COLS = [['title', 'Item'], ['brand', 'Brand'], ['size', 'Size'], ['status', 'Status'], ['purchasedAt', 'Bought'], ['purchasePrice', 'Cost'], ['listedPrice', 'Listed'], ['daysHeld', 'Days'], ['location', 'Location'], ['retailer', 'Retailer']];
+    const invCols = COLS.map(([key, label]) => ({
+      label, arrow: st.sort.col === key ? (st.sort.dir === 'asc' ? ' \u2191' : ' \u2193') : '',
+      go: () => this.setState({ sort: { col: key, dir: st.sort.col === key && st.sort.dir === 'desc' ? 'asc' : 'desc' } }),
+      style: `border:0;background:transparent;color:${st.sort.col === key ? '#c9d0e0' : '#6f7789'};font-family:inherit;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;cursor:pointer;padding:0;text-align:${['purchasePrice', 'listedPrice', 'daysHeld'].includes(key) ? 'right' : 'left'}`
+    }));
+
+    const cellBase = 'font-size:12px;color:#a9b1c2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
+    const list = this.filteredItems();
+    const rows = list.map(i => {
+      const sel = st.selected.includes(i.id);
+      return {
+        title: i.title, sku: i.sku, brand: i.brand, size: i.size, purchasedAt: i.purchasedAt.slice(5),
+        purchasePrice: money(i.purchasePrice), listedPrice: money(i.listedPrice), daysHeld: i.daysHeld,
+        location: i.location, retailer: i.retailer, statusLabel: STATUS[i.status].label,
+        statusChip: chip(i.status), statusDot: sdot(i.status),
+        open: () => this.setState({ openItem: i.id }),
+        toggle: (e) => { e.stopPropagation(); this.setState(s => ({ selected: s.selected.includes(i.id) ? s.selected.filter(x => x !== i.id) : s.selected.concat(i.id) })); },
+        style: `${grid};height:${rowH};border-top:1px solid #1c2230;cursor:pointer;background:${sel ? 'rgba(91,140,255,.07)' : 'transparent'}`,
+        check: sel ? '\u2713' : '', checkStyle: `width:15px;height:15px;border-radius:5px;border:1px solid ${sel ? '#5b8cff' : '#333c4f'};background:${sel ? '#5b8cff' : 'transparent'};color:#0b1020;font-size:10px;font-weight:800;cursor:pointer;padding:0;display:flex;align-items:center;justify-content:center`,
+        thumbStyle: `width:${st.dense ? 22 : 32}px;height:${st.dense ? 22 : 32}px;border-radius:7px;background:repeating-linear-gradient(135deg,#1e2534 0 4px,#252d40 4px 8px)`,
+        cell: cellBase, cellMono: cellBase + ";font-family:'JetBrains Mono',monospace;font-size:11px",
+        cellMonoRight: cellBase + ";font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#d8dde8;text-align:right",
+        daysCell: `font-family:'JetBrains Mono',monospace;font-size:11.5px;text-align:right;color:${i.daysHeld > 90 ? '#e86aa0' : '#a9b1c2'};font-weight:${i.daysHeld > 90 ? 700 : 400}`
+      };
+    });
+
+    const purchases = PURCHASES.filter(p => !st.refundOnly || p.refundOutstanding).map(p => ({
+      retailer: p.retailer, ref: p.ref, date: p.date, itemCount: p.itemCount,
+      subtotal: money(p.subtotal), shipping: money(p.shipping), vat: money(p.vat), total: money(p.total),
+      statusLabel: PSTATUS[p.status][0],
+      statusChip: `display:inline-flex;padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;color:${PSTATUS[p.status][1]};background:color-mix(in oklab,${PSTATUS[p.status][1]} 14%,transparent);border:1px solid color-mix(in oklab,${PSTATUS[p.status][1]} 28%,transparent)`,
+      refund: p.refundOutstanding ? money(p.refundOutstanding) : '\u2014',
+      refundStyle: `text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;font-weight:${p.refundOutstanding ? 700 : 400};color:${p.refundOutstanding ? '#f0a8c0' : '#4f5768'}`,
+      caret: st.expandedPurchase === p.id ? '\u25bc' : '\u25b6',
+      expanded: st.expandedPurchase === p.id,
+      toggle: () => this.setState({ expandedPurchase: st.expandedPurchase === p.id ? null : p.id }),
+      style: purGrid + ';padding:9px 14px;cursor:pointer',
+      lines: [{ title: 'Line item \u2014 ' + p.retailer, size: 'EU 43', price: money(p.subtotal) }]
+    }));
+
+    const refundList = PURCHASES.filter(p => p.refundOutstanding);
+    const groups = st.groupSales
+      ? Array.from(new Set(SALES.map(s => s.marketplace))).map(name => ({ name, rows: SALES.filter(s => s.marketplace === name) }))
+      : [{ name: null, rows: SALES }];
+    const salesRowGrid = salesGrid + ';padding:9px 15px;border-top:1px solid #1c2230';
+
+    const saleGroups = groups.map(g => {
+      const profit = g.rows.reduce((a, s) => a + s.profit.minor, 0);
+      const payout = g.rows.reduce((a, s) => a + s.payout.minor, 0);
+      return {
+        name: g.name, showHeader: !!g.name, count: g.rows.length,
+        payout: money({ minor: payout, currency: 'EUR' }), profit: money({ minor: profit, currency: 'EUR' }),
+        profitStyle: `font-family:'JetBrains Mono',monospace;font-size:12.5px;font-weight:700;color:${profit < 0 ? '#f0a8c0' : '#6ee7d4'}`,
+        rows: g.rows.map(s => ({
+          item: s.item, marketplace: s.marketplace, soldAt: s.soldAt.slice(5), gross: money(s.gross),
+          fees: money(s.fees), shipping: money(s.shipping), vat: money(s.vat), payout: money(s.payout),
+          profit: money(s.profit), margin: s.margin.toFixed(1) + '%',
+          style: salesRowGrid + (s.profit.minor < 0 ? ';background:rgba(232,106,160,.06)' : ''),
+          profitStyle: `text-align:right;font-family:'JetBrains Mono',monospace;font-size:12px;font-weight:700;color:${s.profit.minor < 0 ? '#f0a8c0' : '#6ee7d4'}`,
+          marginStyle: `text-align:right;font-family:'JetBrains Mono',monospace;font-size:11.5px;color:${s.margin < 0 ? '#f0a8c0' : '#8d94a6'}`
+        }))
+      };
+    });
+
+    const attentionShips = SHIPMENTS.filter(s => s.status === 'exception' || s.status === 'unknown' || (s.daysSinceMovement != null && s.daysSinceMovement > 7 && s.status !== 'delivered'));
+    const shipFilterDefs = [['attention', 'Needs attention', attentionShips.length], ['all', 'All', SHIPMENTS.length], ['inbound', 'Inbound', SHIPMENTS.filter(s => s.direction === 'inbound').length], ['outbound', 'Outbound', SHIPMENTS.filter(s => s.direction === 'outbound').length]];
+    const shipFilters = shipFilterDefs.map(([key, label, count]) => ({
+      label, count, go: () => this.setState({ shipFilter: key }),
+      style: fchip(st.shipFilter === key, key === 'attention' ? 'oklch(0.70 0.17 18)' : '#5b8cff')
+    }));
+    const shipList = SHIPMENTS.filter(s => st.shipFilter === 'all' ? true : st.shipFilter === 'attention' ? attentionShips.includes(s) : s.direction === st.shipFilter);
+    const dirStyle = (dir) => `display:inline-flex;padding:2px 8px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:${dir === 'inbound' ? '#f7a08a' : '#6ee7d4'};background:color-mix(in oklab,${dir === 'inbound' ? '#f7a08a' : '#6ee7d4'} 13%,transparent)`;
+
+    const shipments = shipList.map(s => {
+      const stalled = s.daysSinceMovement != null && s.daysSinceMovement > 7 && s.status !== 'delivered';
+      const overdue = s.expectedDeliveryAt && s.expectedDeliveryAt < '2026-08-18' && s.status !== 'delivered';
+      return {
+        dir: s.direction === 'inbound' ? 'in' : 'out', dirStyle: dirStyle(s.direction),
+        carrier: s.carrier, carrierAbbr: CARRIER[s.carrier][0], tracking: s.tracking, linked: s.linked,
+        carrierMark: `width:22px;height:22px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;color:#0b0d12;background:${CARRIER[s.carrier][1]}`,
+        statusLabel: SHIP_STATUS[s.status][0],
+        statusChip: `display:inline-flex;align-items:center;gap:6px;padding:3px 9px 3px 7px;border-radius:999px;font-size:11px;font-weight:600;color:${SHIP_STATUS[s.status][1]};background:color-mix(in oklab,${SHIP_STATUS[s.status][1]} 14%,transparent);border:1px solid color-mix(in oklab,${SHIP_STATUS[s.status][1]} 30%,transparent)`,
+        statusDot: `width:6px;height:6px;border-radius:50%;background:${SHIP_STATUS[s.status][1]};flex:none`,
+        lastMovement: s.lastMovementAt ? (stalled ? s.daysSinceMovement + 'd ago \u26a0' : s.lastMovementAt.slice(5)) : 'never',
+        moveStyle: `font-family:'JetBrains Mono',monospace;font-size:11px;color:${stalled ? '#f0a8c0' : '#8d94a6'};font-weight:${stalled ? 700 : 400}`,
+        expected: s.expectedDeliveryAt ? s.expectedDeliveryAt.slice(5) : '\u2014',
+        expectedStyle: `font-family:'JetBrains Mono',monospace;font-size:11px;color:${overdue ? '#f0a8c0' : '#8d94a6'}`,
+        open: () => this.setState({ openShip: s.id }),
+        style: shipGrid + `;padding:9px 15px;border-top:1px solid #1c2230;cursor:pointer;background:${st.openShip === s.id ? 'rgba(91,140,255,.07)' : s.status === 'exception' ? 'rgba(232,106,160,.06)' : 'transparent'}`
+      };
+    });
+
+    const sd = SHIPMENTS.find(s => s.id === st.openShip);
+    const shipDetail = sd ? {
+      carrier: sd.carrier + ' \u00b7 ' + (sd.direction === 'inbound' ? 'inbound' : 'outbound'), tracking: sd.tracking,
+      warningTitle: sd.status === 'exception' ? 'Delivery failed' : sd.daysSinceMovement > 7 ? 'No movement for ' + sd.daysSinceMovement + ' days' : '',
+      warning: sd.status === 'exception' ? 'Carrier reported a failed delivery attempt on 13 Aug. Parcel is held at a PostNL point and returns to sender in 4 days.' : sd.daysSinceMovement > 7 ? 'Last scan was ' + sd.daysSinceMovement + ' days ago, past the expected delivery date.' : '',
+      events: [
+        ['Delivery attempt failed \u2014 no answer', '13 Aug 14:22', 'Amsterdam NL', 'oklch(0.70 0.17 18)'],
+        ['Out for delivery', '13 Aug 07:05', 'Amsterdam NL', 'oklch(0.78 0.12 178)'],
+        ['Departed sorting centre', '12 Aug 21:40', 'Utrecht NL', 'oklch(0.76 0.12 232)'],
+        ['Shipment accepted by carrier', '12 Aug 16:12', 'Nieuwegein NL', 'oklch(0.66 0.02 265)']
+      ].map(e => ({ description: e[0], at: e[1], location: e[2], dot: `width:8px;height:8px;border-radius:50%;background:${e[3]};flex:none;margin-top:4px` }))
+    } : null;
+
+    const reviewItems = REVIEW.map((m, i) => ({
+      ...m, recording: st.recording === i,
+      record: () => this.setState({ recording: st.recording === i ? null : i }),
+      ignore: () => this.setState({ recording: null }),
+      fields: [{ label: 'EVENT TYPE', placeholder: 'Order shipped' }, { label: 'RETAILER', placeholder: 'Zalando' }, { label: 'ORDER REF', placeholder: '10029182' }, { label: 'AMOUNT', placeholder: '\u20ac0.00' }]
+    }));
+
+    const REPORTS = {
+      pl: {
+        title: 'Profit and loss', sub: 'Q3 2026 \u00b7 by marketplace',
+        totals: [['REVENUE', money(eur(15762.40)), '#e8eaf0'], ['NET PROFIT', money(eur(4318.55)), '#6ee7d4'], ['MARGIN', '27.4%', '#6ee7d4']],
+        cols: ['Marketplace', 'Sales', 'Gross', 'Fees', 'Profit'],
+        rows: [['Vinted', '18', money(eur(5420)), money(eur(271)), money(eur(1402.30))], ['StockX', '11', money(eur(3980)), money(eur(478)), money(eur(742.10))], ['eBay', '9', money(eur(2810)), money(eur(337)), money(eur(388.40))], ['TicketSwap', '6', money(eur(2270)), money(eur(136)), money(eur(1421.75))], ['Marktplaats', '4', money(eur(1282.40)), money(eur(0)), money(eur(364.00))]]
+      },
+      vat: {
+        title: 'VAT return', sub: 'Q3 2026 \u00b7 NL \u00b7 21% \u00b7 filed from these figures',
+        totals: [['INPUT VAT (PURCHASES)', money(eur(2164.30)), '#e8eaf0'], ['OUTPUT VAT (SALES)', money(eur(2735.80)), '#e8eaf0'], ['NET PAYABLE', money(eur(571.50)), '#f7a08a']],
+        cols: ['Period', 'Transactions', 'Input VAT', 'Output VAT', 'Net'],
+        rows: [['July 2026', '31', money(eur(742.10)), money(eur(921.40)), money(eur(179.30))], ['August 2026', '28', money(eur(688.20)), money(eur(870.10)), money(eur(181.90))], ['September 2026', '24', money(eur(734.00)), money(eur(944.30)), money(eur(210.30))]]
+      },
+      fx: {
+        title: 'Currency exposure', sub: 'Holdings and transactions by original currency',
+        totals: [['BASE CURRENCY', 'EUR', '#e8eaf0'], ['NON-EUR HOLDINGS', money(eur(2418.60)), '#e8eaf0'], ['FX DRIFT THIS QUARTER', '-\u20ac86.20', '#f0a8c0']],
+        cols: ['Currency', 'Units held', 'Original value', 'In EUR', 'Rate used'],
+        rows: [['EUR', '11', money(eur(3612)), money(eur(3612)), '1.0000'], ['USD', '3', '$1,240.00', money(eur(1141.80)), '0.9208'], ['GBP', '2', '\u00a31,090.00', money(eur(1276.80)), '1.1714']]
+      }
+    };
+    const rep = REPORTS[st.reviewTab];
+    const repColStyle = (i, n) => `font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#6f7789;text-align:${i >= n - 3 ? 'right' : 'left'}`;
+    const report = {
+      title: rep.title, sub: rep.sub,
+      totals: rep.totals.map(t => ({ label: t[0], value: t[1], style: `font-family:'JetBrains Mono',monospace;font-size:20px;font-weight:600;letter-spacing:-.02em;color:${t[2]}` })),
+      cols: rep.cols.map((label, i) => ({ label, style: repColStyle(i, rep.cols.length) })),
+      rows: rep.rows.map(cells => ({ cells: cells.map((value, i) => ({ value, style: `font-size:12px;${i === 0 ? 'font-weight:600;color:#d8dde8' : "font-family:'JetBrains Mono',monospace;color:#a9b1c2;text-align:" + (i >= rep.cols.length - 3 ? 'right' : 'left')}` })) }))
+    };
+    const repGrid = `display:grid;grid-template-columns:repeat(${rep.cols.length},1fr);gap:12px;padding:9px 14px;align-items:center`;
+
+    const reportTabs = [['pl', 'Profit & loss'], ['vat', 'VAT return'], ['fx', 'Currency exposure']].map(([key, label]) => ({
+      label, go: () => this.setState({ reviewTab: key }),
+      style: `border:0;background:${st.reviewTab === key ? '#242c3e' : 'transparent'};color:${st.reviewTab === key ? '#e8eaf0' : '#7a8296'};border-radius:999px;padding:6px 14px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer`
+    }));
+
+    const ACCOUNTS = [['jasper@gmail.com', 'Gmail', 'imap.gmail.com:993', 'ok', '4m ago'], ['orders@outlook.com', 'Outlook', 'outlook.office365.com:993', 'ok', '4m ago'], ['jasper@web.de', 'web.de', 'imap.web.de:993', 'error', '3h ago'], ['shop@privateemail.com', 'Namecheap', 'mail.privateemail.com:993', 'ok', '11m ago']];
+    const accounts = ACCOUNTS.map(a => {
+      const c = a[3] === 'ok' ? 'oklch(0.78 0.12 148)' : 'oklch(0.70 0.17 18)';
+      return { address: a[0], provider: a[1], host: a[2], lastSync: a[4], status: a[3] === 'ok' ? 'Connected' : 'Auth failed',
+        dot: `width:8px;height:8px;border-radius:50%;background:${c};flex:none`,
+        chip: `padding:3px 9px;border-radius:999px;font-size:11px;font-weight:600;color:${c};background:color-mix(in oklab,${c} 14%,transparent)` };
+    });
+
+    const PROVIDERS = ['Gmail', 'Outlook', 'Yahoo', 'web.de', 'iCloud', 'Namecheap', 'Custom'];
+    const HOSTS = { Gmail: ['imap.gmail.com', '993'], Outlook: ['outlook.office365.com', '993'], Yahoo: ['imap.mail.yahoo.com', '993'], 'web.de': ['imap.web.de', '993'], iCloud: ['imap.mail.me.com', '993'], Namecheap: ['mail.privateemail.com', '993'], Custom: ['', '993'] };
+    const providers = PROVIDERS.map(p => ({
+      label: p, go: () => this.setState({ provider: p, testResult: '' }),
+      style: `border:1px solid ${st.provider === p ? '#5b8cff' : '#2b3346'};background:${st.provider === p ? 'rgba(91,140,255,.14)' : 'transparent'};color:${st.provider === p ? '#b9cdff' : '#98a0b3'};border-radius:999px;padding:5px 12px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer`
+    }));
+    const needsAppPassword = st.provider === 'Gmail' || st.provider === 'Yahoo';
+
+    const notifications = ['Order placed', 'Order shipped', 'Order delivered', 'Order cancelled', 'Refund received', 'Item sold', 'Payout received', 'Shipment exception'].map((label, i) => {
+      const on = st.notifOn.includes(i);
+      return { label, toggle: () => this.setState(s => ({ notifOn: on ? s.notifOn.filter(x => x !== i) : s.notifOn.concat(i) })),
+        trackStyle: `width:34px;height:19px;border-radius:999px;border:0;padding:2px;cursor:pointer;background:${on ? '#5b8cff' : '#2b3346'};display:flex;justify-content:${on ? 'flex-end' : 'flex-start'};align-items:center`,
+        knobStyle: 'width:15px;height:15px;border-radius:50%;background:#e8eaf0;display:block' };
+    });
+
+    const item = ITEMS.find(i => i.id === st.openItem);
+    const sale = item ? SALES.find(s => s.item === item.title) : null;
+    const drawer = item ? {
+      title: item.title, subtitle: item.brand + ' \u00b7 ' + item.size + ' \u00b7 ' + item.condition, sku: item.sku,
+      statusLabel: STATUS[item.status].label, statusChip: chip(item.status), statusDot: sdot(item.status),
+      purchase: [{ label: 'Retailer', value: item.retailer }, { label: 'Ordered', value: item.purchasedAt }, { label: 'Price ex VAT', value: money(eur(item.purchasePrice.minor / 100 / 1.21)) }, { label: 'VAT 21%', value: money(eur(item.purchasePrice.minor / 100 * 0.1736)) }, { label: 'Total paid', value: money(item.purchasePrice) }],
+      rightTitle: sale ? 'SALE & PROFIT' : 'HOLDING',
+      right: sale
+        ? [{ label: 'Marketplace', value: sale.marketplace }, { label: 'Gross', value: money(sale.gross) }, { label: 'Fees', value: money(sale.fees) }, { label: 'Payout', value: money(sale.payout) }, { label: 'Profit', value: money(sale.profit) + ' \u00b7 ' + sale.margin.toFixed(1) + '%' }]
+            .map((r, i, arr) => ({ ...r, style: `font-family:'JetBrains Mono',monospace;color:${i === arr.length - 1 ? (sale.profit.minor < 0 ? '#f0a8c0' : '#6ee7d4') : '#d8dde8'};font-weight:${i === arr.length - 1 ? 700 : 400}` }))
+        : [{ label: 'Days held', value: String(item.daysHeld) }, { label: 'Location', value: item.location }, { label: 'Listed at', value: money(item.listedPrice) }, { label: 'Capital tied up', value: money(item.purchasePrice) }]
+            .map(r => ({ ...r, style: "font-family:'JetBrains Mono',monospace;color:#d8dde8" })),
+      shipments: [
+        { dir: 'in', carrier: 'PostNL', tracking: '3SPOST772819264', statusLabel: 'Delivered', dirStyle: dirStyle('inbound'), statusChip: `padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:600;color:${SHIP_STATUS.delivered[1]};background:color-mix(in oklab,${SHIP_STATUS.delivered[1]} 14%,transparent)` },
+        { dir: 'out', carrier: 'PostNL', tracking: '3SBTC0294817263', statusLabel: 'Exception', dirStyle: dirStyle('outbound'), statusChip: `padding:2px 8px;border-radius:999px;font-size:10.5px;font-weight:600;color:${SHIP_STATUS.exception[1]};background:color-mix(in oklab,${SHIP_STATUS.exception[1]} 14%,transparent)` }
+      ],
+      timeline: [
+        ['Order confirmed', 'parsed', item.retailer + ' order confirmation \u2014 extracted total ' + money(item.purchasePrice) + ', 1 line item', item.purchasedAt, 148],
+        ['Shipping notice', 'parsed', 'Tracking 3SPOST772819264 via PostNL, expected 3 days', '2026-07-03', 232],
+        ['Delivered', 'parsed', 'Carrier confirmed delivery, signed for', '2026-07-05', 232],
+        ['Listed price set', 'manual', 'You set the listed price to ' + money(item.listedPrice || item.purchasePrice) + ' \u2014 not from an email', '2026-07-06', 285],
+        ['Purchase price corrected', 'user-corrected', 'Parser read \u20ac119.00 from a promotional line. Corrected to ' + money(item.purchasePrice) + '. Re-parse will not overwrite this.', '2026-07-08', 40]
+      ].map(t => ({
+        title: t[0], tag: t[1], detail: t[2], at: t[3], source: t[1] === 'manual' ? 'no source email' : 'View source email \u2197',
+        dot: `width:8px;height:8px;border-radius:50%;background:oklch(0.74 0.13 ${t[4]});flex:none;margin-top:4px`,
+        tagStyle: `padding:1px 7px;border-radius:999px;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:oklch(0.74 0.13 ${t[4]});background:color-mix(in oklab,oklch(0.74 0.13 ${t[4]}) 14%,transparent)`
+      }))
+    } : null;
+
+    const stateOrder = { ready: 'Ready', loading: 'Loading', stale: 'Stale sync', firstrun: 'First run' };
+    const isData = S === 'ready' || S === 'stale';
+
+    return {
+      nav, sync, triggerSync: () => this.setState({ syncState: st.syncState === 'syncing' ? 'idle' : 'syncing' }),
+      screenTitle: st.screen, screenSub: SUBS[st.screen],
+      query: st.query, onQuery: (e) => this.setState({ query: e.target.value }),
+      noop: () => {},
+      stateLabel: 'State: ' + stateOrder[S],
+      cycleState: () => { const o = ['ready', 'loading', 'stale', 'firstrun']; this.setState({ dataState: o[(o.indexOf(S) + 1) % 4] }); },
+      isLoading: S === 'loading', isFirstRun: S === 'firstrun', showStale: S === 'stale',
+      skeleton: Array.from({ length: 11 }, (_, i) => ({ style: `height:${i === 0 ? 78 : 30}px;border-radius:${i === 0 ? 18 : 9}px;background:#161b26;animation:shim 1.1s ease-in-out ${i * 0.05}s infinite` })),
+      showDashboard: isData && st.screen === 'Dashboard',
+      showInventory: isData && st.screen === 'Inventory',
+      showPurchases: isData && st.screen === 'Purchases',
+      showSales: isData && st.screen === 'Sales',
+      showShipments: isData && st.screen === 'Shipments',
+      showReview: isData && st.screen === 'Review',
+      showReports: isData && st.screen === 'Reports',
+      showSettings: isData && st.screen === 'Settings',
+      attentionFirst: st.attentionFirst, metricsFirst: !st.attentionFirst,
+      attention, periods, d,
+      goShipments: this.go('Shipments'), goInventory: this.go('Inventory'), goSettings: this.go('Settings'),
+      statusFilters, invCols, rows,
+      invHeadStyle: grid + ';height:34px;background:#171d2a;border-bottom:1px solid #1f2532',
+      noMatch: rows.length === 0, totalItems: ITEMS.length,
+      rowCountLabel: rows.length + ' of ' + ITEMS.length + ' items',
+      resetFilters: () => this.setState({ statusFilter: 'all', query: '' }),
+      densityLabel: st.dense ? 'Compact rows' : 'Roomy rows',
+      toggleDensity: () => this.setState({ dense: !st.dense }),
+      hasSelection: st.selected.length > 0,
+      selectionLabel: st.selected.length + ' selected',
+      bulkActions: [{ label: 'Mark listed' }, { label: 'Mark sold' }, { label: 'Move location' }],
+      clearSelection: () => this.setState({ selected: [] }),
+      purchases, refundCount: refundList.length,
+      refundTotalLabel: money({ minor: refundList.reduce((a, p) => a + p.refundOutstanding.minor, 0), currency: 'EUR' }) + ' outstanding across ' + refundList.length + ' orders',
+      toggleRefundOnly: () => this.setState({ refundOnly: !st.refundOnly }),
+      refundFilterStyle: fchip(st.refundOnly, 'oklch(0.70 0.17 350)'),
+      purHeadStyle: purGrid + ';padding:10px 14px;background:#171d2a;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#6f7789',
+      saleGroups, salesHeadStyle: salesGrid + ';padding:10px 15px;background:#171d2a;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#6f7789',
+      groupBtnLabel: st.groupSales ? 'Grouped by marketplace' : 'Flat list',
+      groupBtnStyle: fchip(st.groupSales, '#5b8cff'),
+      toggleGrouping: () => this.setState({ groupSales: !st.groupSales }),
+      salesSummary: SALES.length + ' sales \u00b7 2 loss-making',
+      shipFilters, shipments, shipDetail, closeShip: () => this.setState({ openShip: null }),
+      shipHeadStyle: shipGrid + ';padding:10px 15px;background:#171d2a;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#6f7789',
+      reviewItems, reviewEmpty: false,
+      reportTabs, report, reportHeadStyle: repGrid + ';background:#171d2a', reportRowStyle: repGrid + ';border-top:1px solid #1c2230',
+      accounts, providers, needsAppPassword,
+      appPasswordNote: st.provider + ' rejects your normal account password over IMAP. Create an app-specific password in your ' + st.provider + ' security settings and paste that here instead.',
+      accountFields: [{ label: 'ADDRESS', value: '', placeholder: 'you@' + (st.provider === 'Custom' ? 'domain.com' : st.provider.toLowerCase() + '.com') }, { label: needsAppPassword ? 'APP PASSWORD' : 'PASSWORD', value: '', placeholder: needsAppPassword ? 'xxxx xxxx xxxx xxxx' : '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022' }, { label: 'HOST', value: HOSTS[st.provider][0], placeholder: 'imap.example.com' }, { label: 'PORT', value: HOSTS[st.provider][1], placeholder: '993' }],
+      addingAccount: st.addingAccount, addAccountLabel: st.addingAccount ? 'Cancel' : '+ Add account',
+      toggleAddAccount: () => this.setState({ addingAccount: !st.addingAccount, testResult: '' }),
+      testConnection: () => this.setState({ testResult: needsAppPassword ? 'Failed: AUTHENTICATIONFAILED \u2014 app-specific password required' : 'Connected \u00b7 1 842 messages in INBOX' }),
+      testResult: st.testResult,
+      testResultStyle: `font-size:11.5px;font-family:'JetBrains Mono',monospace;color:${st.testResult.startsWith('Failed') ? '#f0a8c0' : '#6ee7d4'}`,
+      vatFields: [{ label: 'Base reporting currency', value: 'EUR' }, { label: 'VAT registration country', value: 'NL' }, { label: 'Default VAT rate', value: '21%' }],
+      notifications,
+      parsers: [['Nike.com', 'from:nike.com subject:order', '412 parsed'], ['StockX', 'from:stockx.com', '288 parsed'], ['Vinted', 'from:vinted.nl subject:verkocht', '196 parsed'], ['PostNL', 'from:postnl.nl track&trace', '843 parsed'], ['SSENSE', 'from:ssense.com', '61 parsed']].map(p => ({ retailer: p[0], match: p[1], parsed: p[2] })),
+      drawer, closeDrawer: () => this.setState({ openItem: null, confirming: false }),
+      confirming: st.confirming, askDelete: () => this.setState({ confirming: true }), cancelDelete: () => this.setState({ confirming: false })
+    };
+  }
+}
+
+</script>
+</body>
+</html>

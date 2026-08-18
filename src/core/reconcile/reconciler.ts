@@ -1,0 +1,245 @@
+import { createHash } from 'node:crypto'
+import type { Db } from '../db/connection.js'
+import { EventRepo, type StoredEvent } from '../repos/events.js'
+
+/**
+ * Turns parsed events into the entities the application reasons about:
+ * purchases, individual items, shipments and refunds.
+ *
+ * Two properties matter more than anything else here.
+ *
+ * **Idempotence.** Every row this writes has an id derived from the facts that
+ * identify it, so applying the same event twice updates rather than duplicates.
+ * Re-running a corrected parser over retained mail therefore heals the data
+ * instead of doubling your stock.
+ *
+ * **Tolerance of disorder.** Mail does not arrive in the order things happened.
+ * A shipping notice can precede its order confirmation, and a cancellation can
+ * refer to an order that was never captured. An event that cannot yet be
+ * applied is *held* — left unreconciled — and retried on the next run, rather
+ * than being dropped or guessed at.
+ */
+export class Reconciler {
+  private readonly events: EventRepo
+
+  constructor(private readonly db: Db) {
+    this.events = new EventRepo(db)
+  }
+
+  run(now: string): { applied: number; held: number } {
+    const pending = [...this.events.listUnreconciled()].sort((a, b) =>
+      a.occurredAt < b.occurredAt ? -1 : a.occurredAt > b.occurredAt ? 1 : 0,
+    )
+
+    let applied = 0
+    let held = 0
+
+    for (const event of pending) {
+      const done = this.apply(event, now)
+      if (done) {
+        this.events.markReconciled(event.id, now)
+        applied += 1
+      } else {
+        held += 1
+      }
+    }
+
+    return { applied, held }
+  }
+
+  /** Returns false when the event cannot be applied yet and should be retried. */
+  private apply(event: StoredEvent, now: string): boolean {
+    switch (event.type) {
+      case 'order_placed':
+      case 'order_confirmed':
+        return this.applyOrder(event, now)
+      case 'shipped':
+        return this.applyShipment(event, now)
+      case 'cancelled':
+        return this.applyCancellation(event, now)
+      case 'delivered':
+        return this.applyDelivery(event)
+      default:
+        // Nothing to do for this type yet, but it is not an error: mark it done
+        // so it does not accumulate in the queue forever.
+        return true
+    }
+  }
+
+  private applyOrder(event: StoredEvent, now: string): boolean {
+    if (!event.externalOrderId) return true
+
+    const payload = event.payload as Record<string, unknown>
+    const purchaseId = purchaseKey(event.retailer, event.externalOrderId)
+    const currency = (payload.currency as string) ?? 'EUR'
+    const quantity = Math.max(1, Number(payload.quantity ?? 1))
+    const unitMinor = Number(payload.unitMinor ?? 0)
+
+    this.db.prepare(
+      `INSERT INTO purchases
+         (id, retailer, external_order_id, ordered_at, status, currency,
+          subtotal_minor, shipping_minor, vat_minor, total_minor, created_at)
+       VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?, 0, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         ordered_at = excluded.ordered_at,
+         currency = excluded.currency,
+         subtotal_minor = excluded.subtotal_minor,
+         shipping_minor = excluded.shipping_minor,
+         total_minor = excluded.total_minor`,
+    ).run(
+      purchaseId,
+      event.retailer,
+      event.externalOrderId,
+      event.occurredAt,
+      currency,
+      unitMinor * quantity,
+      Number(payload.shippingMinor ?? 0),
+      Number(payload.totalMinor ?? 0),
+      now,
+    )
+
+    // One row per physical unit, so each can be sold and tracked on its own.
+    for (let index = 0; index < quantity; index += 1) {
+      this.db.prepare(
+        `INSERT INTO items
+           (id, purchase_id, title, sku, size, condition, status, cost_minor,
+            cost_currency, purchased_at, created_at)
+         VALUES (?, ?, ?, NULL, NULL, 'new', 'incoming', ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           title = excluded.title,
+           cost_minor = excluded.cost_minor,
+           cost_currency = excluded.cost_currency,
+           purchased_at = excluded.purchased_at`,
+      ).run(
+        itemKey(purchaseId, index),
+        purchaseId,
+        (payload.title as string | null) ?? 'Unknown item',
+        unitMinor,
+        currency,
+        event.occurredAt,
+        now,
+      )
+    }
+
+    // A shipping notice may already have arrived for this order.
+    this.db.prepare(
+      `UPDATE shipments SET purchase_id = ?
+       WHERE purchase_id IS NULL AND id IN (
+         SELECT s.id FROM shipments s
+         JOIN events e ON e.id = s.id
+         WHERE e.retailer = ? AND e.external_order_id = ?
+       )`,
+    ).run(purchaseId, event.retailer, event.externalOrderId)
+
+    return true
+  }
+
+  private applyShipment(event: StoredEvent, now: string): boolean {
+    const payload = event.payload as Record<string, unknown>
+    const purchaseId = event.externalOrderId
+      ? this.findPurchaseId(event.retailer, event.externalOrderId)
+      : null
+
+    // A shipment is worth recording whether or not its order was ever captured,
+    // so this never holds the event back.
+    this.db.prepare(
+      `INSERT INTO shipments
+         (id, direction, carrier, tracking_number, tracking_url, status, purchase_id,
+          expected_delivery_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         carrier = excluded.carrier,
+         tracking_number = COALESCE(excluded.tracking_number, shipments.tracking_number),
+         tracking_url = COALESCE(excluded.tracking_url, shipments.tracking_url),
+         status = excluded.status,
+         purchase_id = COALESCE(excluded.purchase_id, shipments.purchase_id),
+         expected_delivery_at = excluded.expected_delivery_at`,
+    ).run(
+      event.id,
+      (payload.direction as string) ?? 'inbound',
+      (payload.carrier as string) ?? 'unknown',
+      (payload.trackingNumber as string | null) ?? null,
+      (payload.trackingUrl as string | null) ?? null,
+      payload.trackingNumber ? 'in_transit' : 'pending',
+      purchaseId,
+      (payload.expectedDeliveryAt as string | null) ?? null,
+      now,
+    )
+
+    return true
+  }
+
+  private applyCancellation(event: StoredEvent, now: string): boolean {
+    if (!event.externalOrderId) return true
+    const purchaseId = this.findPurchaseId(event.retailer, event.externalOrderId)
+
+    // Without the original order there is nothing to reverse, and the refund
+    // amount is not stated in a cancellation mail. Hold it for the next run.
+    if (!purchaseId) return false
+
+    this.db.prepare("UPDATE purchases SET status = 'cancelled' WHERE id = ?").run(purchaseId)
+    this.db.prepare(
+      "UPDATE items SET status = 'cancelled' WHERE purchase_id = ? AND status NOT IN ('sold','delivered','returned')",
+    ).run(purchaseId)
+
+    if (event.payload.refundExpected) {
+      const purchase = this.db
+        .prepare('SELECT total_minor, currency FROM purchases WHERE id = ?')
+        .get(purchaseId) as { total_minor: number; currency: string }
+
+      this.db.prepare(
+        `INSERT INTO refunds (id, purchase_id, currency, amount_minor, received_at, expected_at, created_at)
+         VALUES (?, ?, ?, ?, NULL, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET amount_minor = excluded.amount_minor`,
+      ).run(
+        refundKey(purchaseId),
+        purchaseId,
+        purchase.currency,
+        purchase.total_minor,
+        event.occurredAt,
+        now,
+      )
+    }
+
+    return true
+  }
+
+  private applyDelivery(event: StoredEvent): boolean {
+    if (!event.externalOrderId) return true
+    const purchaseId = this.findPurchaseId(event.retailer, event.externalOrderId)
+    if (!purchaseId) return false
+
+    // Only items still in transit move into stock; a cancelled or returned item
+    // must not be resurrected by a late delivery notice.
+    this.db.prepare(
+      "UPDATE items SET status = 'in_stock' WHERE purchase_id = ? AND status = 'incoming'",
+    ).run(purchaseId)
+    this.db.prepare("UPDATE purchases SET status = 'delivered' WHERE id = ? AND status != 'cancelled'")
+      .run(purchaseId)
+
+    return true
+  }
+
+  private findPurchaseId(retailer: string, externalOrderId: string): string | null {
+    const row = this.db
+      .prepare('SELECT id FROM purchases WHERE retailer = ? AND external_order_id = ?')
+      .get(retailer, externalOrderId) as { id: string } | undefined
+    return row?.id ?? null
+  }
+}
+
+function digest(input: string): string {
+  return createHash('sha256').update(input).digest('hex').slice(0, 32)
+}
+
+export function purchaseKey(retailer: string, externalOrderId: string): string {
+  return digest(`purchase|${retailer}|${externalOrderId}`)
+}
+
+export function itemKey(purchaseId: string, index: number): string {
+  return digest(`item|${purchaseId}|${index}`)
+}
+
+export function refundKey(purchaseId: string): string {
+  return digest(`refund|${purchaseId}`)
+}
