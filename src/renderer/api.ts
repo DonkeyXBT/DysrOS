@@ -19,6 +19,7 @@ export interface CancellationView {
 export interface ReviewView {
   id: string; from: string; address: string
   subject: string; receivedAt: string; preview: string
+  exportable: boolean
 }
 export interface ParserView { id: string; retailer: string; parsed: number }
 export interface ProviderView {
@@ -126,6 +127,10 @@ interface Api {
   discordTest(): Promise<{ ok: boolean; message: string }>
   reparseAll(): Promise<{ examined: number; reparsed: number; missing: number }>
   resolveTracking(): Promise<{ attempted: number; resolved: number; failed: number }>
+  exportMessage(id: string, format: 'eml' | 'html'): Promise<{
+    saved: boolean; path?: string; reason?: string
+  }>
+  exportAllUnrecognised(): Promise<{ saved: number; folder?: string; reason?: string }>
   aycdStatus(): Promise<AycdStatusView>
   aycdSetKey(key: string): Promise<void>
   aycdClearKey(): Promise<void>

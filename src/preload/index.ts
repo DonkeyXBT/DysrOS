@@ -68,6 +68,9 @@ const api = {
   discordTest: () => ipcRenderer.invoke('discord-test'),
   reparseAll: () => ipcRenderer.invoke('reparse-all'),
   resolveTracking: () => ipcRenderer.invoke('resolve-tracking'),
+  exportMessage: (id: string, format: 'eml' | 'html') =>
+    ipcRenderer.invoke('export-message', id, format),
+  exportAllUnrecognised: () => ipcRenderer.invoke('export-all-unrecognised'),
   aycdStatus: () => ipcRenderer.invoke('aycd-status'),
   aycdSetKey: (key: string) => ipcRenderer.invoke('aycd-set-key', key),
   aycdClearKey: () => ipcRenderer.invoke('aycd-clear-key'),

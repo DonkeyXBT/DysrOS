@@ -58,6 +58,16 @@ export const NOTIFIABLE_EVENTS: { event: NotifiableEvent; label: string; on: boo
   { event: 'shipment_exception', label: 'Shipment problem', on: true },
 ]
 
+/** Keeps a subject usable as a filename without losing what it says. */
+export function safeFileName(subject: string): string {
+  return subject
+    .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 70) || 'message'
+}
+
 export function defaultFolderFor(provider: string): string {
   if (provider === 'gmail') return '[Gmail]/All Mail'
   return 'INBOX'
@@ -448,6 +458,46 @@ export class AppService {
     })
   }
 
+  /**
+   * The stored copy of a message, for sending on so a parser can be written.
+   *
+   * Returns null when no copy was kept — mail fetched before copies were
+   * retained cannot be exported, and saying so is better than writing an empty
+   * file that looks like a failed parser rather than a missing source.
+   */
+  async exportMessage(
+    id: string,
+    format: 'eml' | 'html',
+  ): Promise<{ name: string; content: Buffer } | null> {
+    const row = this.db
+      .prepare('SELECT raw_path, subject, received_at FROM messages WHERE id = ?')
+      .get(id) as { raw_path: string; subject: string; received_at: string } | undefined
+    if (!row?.raw_path || !existsSync(row.raw_path)) return null
+
+    const raw = readFileSync(row.raw_path)
+    const stem = `${row.received_at.slice(0, 10)}-${safeFileName(row.subject)}`
+
+    // The .eml is the useful one for writing a parser: it keeps the headers a
+    // parser matches on. The .html is for looking at the message in a browser.
+    if (format === 'eml') return { name: `${stem}.eml`, content: raw }
+
+    const parsed = await loadEml(raw)
+    const html = parsed.html.trim().length > 0
+      ? parsed.html
+      : `<pre>${parsed.text.replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]!))}</pre>`
+    return { name: `${stem}.html`, content: Buffer.from(html, 'utf8') }
+  }
+
+  /** Every unrecognised message that still has a stored copy. */
+  exportableReviewIds(): string[] {
+    const rows = this.db.prepare(
+      `SELECT id FROM messages
+       WHERE parse_status = 'unrecognized' AND raw_path IS NOT NULL AND raw_path != ''
+       ORDER BY received_at DESC`,
+    ).all() as { id: string }[]
+    return rows.map((row) => row.id)
+  }
+
   listReviewQueue(): ReviewView[] {
     return this.messages.listByStatus('unrecognized').map((message) => ({
       id: message.id,
@@ -456,6 +506,7 @@ export class AppService {
       subject: message.subject,
       receivedAt: message.receivedAt,
       preview: message.bodyPreview,
+      exportable: message.rawPath !== '' && existsSync(message.rawPath),
     }))
   }
 
@@ -1082,6 +1133,8 @@ export interface ReviewView {
   subject: string
   receivedAt: string
   preview: string
+  /** False when no copy of the message was kept, so it cannot be sent on. */
+  exportable: boolean
 }
 
 export interface ParserView {

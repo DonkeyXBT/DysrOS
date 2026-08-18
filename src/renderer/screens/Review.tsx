@@ -5,6 +5,7 @@ import { SkeletonCards } from '../Skeleton.js'
 
 export function Review({ dataVersion }: { dataVersion: number }) {
   const [items, setItems] = useState<ReviewView[] | null>(null)
+  const [note, setNote] = useState<string | null>(null)
 
   useEffect(() => {
     void api.review().then(setItems)
@@ -36,6 +37,28 @@ export function Review({ dataVersion }: { dataVersion: number }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 960 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
+          No parser recognised these. Export one and a parser can be written for it.
+        </span>
+        <button
+          className="btn"
+          style={{ marginLeft: 'auto' }}
+          onClick={async () => {
+            const result = await api.exportAllUnrecognised()
+            setNote(
+              result.reason
+                ?? (result.saved > 0 ? `Saved ${result.saved} file(s) to ${result.folder}` : null),
+            )
+          }}
+        >
+          Export all as .eml
+        </button>
+      </div>
+      {note && (
+        <div style={{ fontSize: 11.5, color: 'var(--teal)', paddingLeft: 2 }}>{note}</div>
+      )}
+
       {paged.visible.map((message) => (
         <div
           key={message.id}
@@ -59,9 +82,35 @@ export function Review({ dataVersion }: { dataVersion: number }) {
           >
             {message.preview}
           </div>
-          <div style={{ display: 'flex', gap: 7, alignItems: 'center' }}>
-            <span style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
-              no parser matched this sender — nothing was discarded
+          <div style={{ display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' }}>
+            {message.exportable ? (
+              <>
+                <button
+                  className="btn"
+                  onClick={async () => {
+                    const result = await api.exportMessage(message.id, 'eml')
+                    setNote(result.reason ?? (result.saved ? `Saved to ${result.path}` : null))
+                  }}
+                >
+                  Download .eml
+                </button>
+                <button
+                  className="btn"
+                  onClick={async () => {
+                    const result = await api.exportMessage(message.id, 'html')
+                    setNote(result.reason ?? (result.saved ? `Saved to ${result.path}` : null))
+                  }}
+                >
+                  Download .html
+                </button>
+              </>
+            ) : (
+              <span style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
+                no stored copy — sync again to collect it
+              </span>
+            )}
+            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text-ghost)' }}>
+              nothing was discarded
             </span>
           </div>
         </div>

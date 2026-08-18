@@ -19,14 +19,13 @@ const NAV = [
   { label: 'Purchases', hue: 285 },
   { label: 'Sales', hue: 148 },
   { label: 'Shipments', hue: 40 },
-  { label: 'Review', hue: 350 },
   { label: 'Reports', hue: 260 },
   { label: 'Settings', hue: 220 },
 ] as const
 
 /** Reachable from Settings rather than the sidebar: it is somewhere you go
  *  when something has gone wrong, not part of the daily rotation. */
-type Extra = 'Logs'
+type Extra = 'Logs' | 'Review'
 
 const SUBTITLES: Record<string, string> = {
   Dashboard: 'What you have, what it cost, what is moving',
@@ -183,11 +182,8 @@ export function App() {
               />
               <span>{item.label}</span>
             </span>
-            {item.label === 'Review' && summary && summary.reviewCount > 0 && (
-              <span className="nav-badge">{summary.reviewCount}</span>
-            )}
-            {item.label === 'Settings' && crashCount > 0 && (
-              <span className="nav-badge">{crashCount}</span>
+            {item.label === 'Settings' && (crashCount > 0 || (summary?.reviewCount ?? 0) > 0) && (
+              <span className="nav-badge">{crashCount + (summary?.reviewCount ?? 0)}</span>
             )}
           </button>
         ))}
@@ -282,6 +278,8 @@ export function App() {
                 setScreen('Logs')
                 setCrashCount(0)
               }}
+              onOpenReview={() => setScreen('Review')}
+              reviewCount={summary?.reviewCount ?? 0}
             />
           )}
           {(screen === 'Inventory' || screen === 'Sales' || screen === 'Reports') && (

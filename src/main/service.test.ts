@@ -479,3 +479,54 @@ describe.skipIf(!allPresent)('tracking resolution', () => {
     expect(result).toEqual({ attempted: 0, resolved: 0, failed: 0 })
   })
 })
+
+describe.skipIf(!allPresent)('exporting mail so a parser can be written', () => {
+  it('exports a stored message as .eml, headers intact', async () => {
+    const imported = await service.importEml(fixturePath(FIXTURES[0]!))
+    void imported
+    const id = service.listPurchases()[0]?.id
+    void id
+
+    // Take any stored message rather than relying on parse status.
+    const anyId = (service as unknown as {
+      db: { prepare(sql: string): { get(): { id: string } | undefined } }
+    }).db.prepare('SELECT id FROM messages LIMIT 1').get()?.id
+    expect(anyId).toBeTruthy()
+
+    const file = await service.exportMessage(anyId!, 'eml')
+    expect(file).not.toBeNull()
+    expect(file!.name.endsWith('.eml')).toBe(true)
+    // A parser matches on headers, so they have to survive the round trip.
+    expect(file!.content.toString('utf8')).toMatch(/^From:/m)
+  })
+
+  it('exports the HTML part when asked for html, not the raw message', async () => {
+    await service.importEml(fixturePath(FIXTURES[0]!))
+    const anyId = (service as unknown as {
+      db: { prepare(sql: string): { get(): { id: string } | undefined } }
+    }).db.prepare('SELECT id FROM messages LIMIT 1').get()?.id
+
+    const file = await service.exportMessage(anyId!, 'html')
+    expect(file!.name.endsWith('.html')).toBe(true)
+    const content = file!.content.toString('utf8')
+    expect(content).not.toMatch(/^From:/m)
+    expect(content.toLowerCase()).toContain('<')
+  })
+
+  it('returns null for a message whose copy was never kept', async () => {
+    expect(await service.exportMessage('does-not-exist', 'eml')).toBeNull()
+  })
+})
+
+describe('filenames', () => {
+  it('keeps a subject readable while making it a valid filename', async () => {
+    const { safeFileName } = await import('./service.js')
+    expect(safeFileName('Je pakket is nu bij DHL')).toBe('Je-pakket-is-nu-bij-DHL')
+    expect(safeFileName('Order #12/34: "urgent"')).toBe('Order-#1234-urgent')
+  })
+
+  it('never produces an empty name', async () => {
+    const { safeFileName } = await import('./service.js')
+    expect(safeFileName('///')).toBe('message')
+  })
+})
