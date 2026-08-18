@@ -16,6 +16,11 @@ import { Reconciler } from '../core/reconcile/reconciler.js'
 import { AccountRepo, type Encryptor, type MailAccount, type NewAccount } from '../core/repos/accounts.js'
 import { MailboxSync } from '../core/mail/ingest.js'
 import { ImapFlowClient, testConnection, explainConnectionError } from '../core/mail/imapflow-client.js'
+import { AycdClient } from '../core/aycd/client.js'
+import { AYCD_TASK_BUILDERS } from '../core/aycd/tasks.js'
+import {
+  AycdWatcher, systemClock, type CapturedEvent, type InboxTransport, type WatcherClock,
+} from '../core/aycd/watcher.js'
 
 /**
  * Where a provider keeps everything.
@@ -23,6 +28,12 @@ import { ImapFlowClient, testConnection, explainConnectionError } from '../core/
  * Gmail hides archived mail from INBOX but keeps it in All Mail, so syncing
  * only INBOX would miss any order confirmation that was archived or filtered.
  */
+/** Settings keys for the AYCD Inbox integration. The key setting holds the
+ *  ciphertext, never the key itself. */
+const AYCD_KEY_SETTING = 'aycd_api_key_cipher'
+const AYCD_ADDRESSES_SETTING = 'aycd_addresses'
+const AYCD_ERROR_SETTING = 'aycd_last_error'
+
 export function defaultFolderFor(provider: string): string {
   if (provider === 'gmail') return '[Gmail]/All Mail'
   return 'INBOX'
@@ -47,8 +58,9 @@ export class AppService {
   private readonly reconciler: Reconciler
   private readonly accounts: AccountRepo
   private readonly mailbox: MailboxSync
+  private aycd: AycdWatcher | null = null
 
-  constructor(databasePath: string, encryptor: Encryptor) {
+  constructor(databasePath: string, private readonly encryptor: Encryptor) {
     this.db = openDatabase(databasePath)
     migrate(this.db)
     this.messages = new MessageRepo(this.db)
@@ -161,52 +173,79 @@ export class AppService {
     return { subject: stored.subject, parserId: result.parserId, events: written.length }
   }
 
-  /** Shipments derived from `shipped` events, shaped for the shipments screen. */
+  /**
+   * Shipments as reconciled. The reconciler links a shipment to its order once
+   * both have arrived, in either order, so this reports the linkage rather than
+   * re-deriving it from whichever event happens to be present.
+   *
+   * Contents come from the originating event: a shipping mail names what is in
+   * the parcel, and that detail exists nowhere else.
+   */
   listShipments(): ShipmentView[] {
-    const events = this.allEvents().filter((event) => event.type === 'shipped')
-    return events.map((event) => {
-      const payload = event.payload as Record<string, unknown>
+    const rows = this.db.prepare(
+      `SELECT s.*, e.payload_json, e.retailer, e.external_order_id
+       FROM shipments s
+       LEFT JOIN events e ON e.id = s.id
+       ORDER BY s.created_at DESC`,
+    ).all() as Record<string, unknown>[]
+
+    return rows.map((row) => {
+      const payload = row.payload_json
+        ? (JSON.parse(row.payload_json as string) as Record<string, unknown>)
+        : {}
+      const reference = (row.external_order_id as string | null) ?? null
       return {
-        id: event.id,
-        direction: (payload.direction as string) ?? 'inbound',
-        carrier: (payload.carrier as string) ?? 'unknown',
-        trackingNumber: (payload.trackingNumber as string | null) ?? null,
-        trackingUrl: (payload.trackingUrl as string | null) ?? null,
-        linked: `${event.retailer} · ${event.externalOrderId ?? '—'}`,
+        id: row.id as string,
+        direction: row.direction as string,
+        carrier: row.carrier as string,
+        trackingNumber: (row.tracking_number as string | null) ?? null,
+        trackingUrl: (row.tracking_url as string | null) ?? null,
+        linked: `${(row.retailer as string) ?? 'unknown'} \u00b7 ${reference ?? '\u2014'}`,
         title: (payload.title as string | null) ?? null,
         quantity: (payload.quantity as number) ?? 1,
-        status: payload.trackingNumber ? 'in_transit' : 'pending',
-        lastMovementAt: null,
-        expectedDeliveryAt: (payload.expectedDeliveryAt as string | null) ?? null,
+        status: row.status as string,
+        lastMovementAt: (row.last_movement_at as string | null) ?? null,
+        expectedDeliveryAt: (row.expected_delivery_at as string | null) ?? null,
         postalCode: (payload.deliveryPostalCode as string | null) ?? null,
         city: (payload.deliveryCity as string | null) ?? null,
         dhlRedirectable: Boolean(payload.dhlRedirectable),
+        /** True once the reconciler has matched this parcel to its order. */
+        linkedToPurchase: row.purchase_id !== null,
       }
     })
   }
 
   listPurchases(): PurchaseView[] {
-    return this.allEvents()
-      .filter((event) => event.type === 'order_placed')
-      .map((event) => {
-        const payload = event.payload as Record<string, unknown>
-        const currency = (payload.currency as Money['currency']) ?? 'EUR'
-        const total = money((payload.totalMinor as number) ?? 0, currency)
-        return {
-          id: event.id,
-          retailer: event.retailer,
-          reference: event.externalOrderId,
-          orderedAt: event.occurredAt,
-          title: (payload.title as string | null) ?? null,
-          quantity: (payload.quantity as number) ?? 1,
-          unit: formatMoney(money((payload.unitMinor as number) ?? 0, currency)),
-          shipping: formatMoney(money((payload.shippingMinor as number) ?? 0, currency)),
-          total: formatMoney(total),
-          totalMinor: total.minor,
-          totalsConsistent: Boolean(payload.totalsConsistent),
-          status: 'confirmed',
-        }
-      })
+    const rows = this.db.prepare(
+      `SELECT p.*,
+              (SELECT COUNT(*) FROM items i WHERE i.purchase_id = p.id) AS item_count,
+              (SELECT i.cost_minor FROM items i WHERE i.purchase_id = p.id LIMIT 1) AS unit_minor,
+              (SELECT COALESCE(SUM(r.amount_minor), 0) FROM refunds r
+                WHERE r.purchase_id = p.id AND r.received_at IS NULL) AS refund_outstanding
+       FROM purchases p
+       ORDER BY p.ordered_at DESC`,
+    ).all() as Record<string, unknown>[]
+
+    return rows.map((row) => {
+      const currency = (row.currency as Money['currency']) ?? 'EUR'
+      const total = money(row.total_minor as number, currency)
+      const outstanding = row.refund_outstanding as number
+      return {
+        id: row.id as string,
+        retailer: row.retailer as string,
+        reference: (row.external_order_id as string | null) ?? null,
+        orderedAt: row.ordered_at as string,
+        title: (row.title as string | null) ?? null,
+        quantity: (row.item_count as number) || 1,
+        unit: formatMoney(money((row.unit_minor as number) ?? 0, currency)),
+        shipping: formatMoney(money(row.shipping_minor as number, currency)),
+        total: formatMoney(total),
+        totalMinor: total.minor,
+        totalsConsistent: row.totals_consistent === 1,
+        status: row.status as string,
+        refundOutstanding: outstanding > 0 ? formatMoney(money(outstanding, currency)) : null,
+      }
+    })
   }
 
   listCancellations(): CancellationView[] {
@@ -411,6 +450,160 @@ export class AppService {
     }))
   }
 
+  /**
+   * The AYCD Inbox key, kept the same way mail passwords are: encrypted by the
+   * injected cipher and never written, returned or logged in plaintext.
+   */
+  setAycdApiKey(apiKey: string): void {
+    const trimmed = apiKey.trim()
+    if (trimmed.length === 0) {
+      this.clearAycdApiKey()
+      return
+    }
+    this.setSetting(AYCD_KEY_SETTING, this.encryptor.encrypt(trimmed))
+  }
+
+  clearAycdApiKey(): void {
+    this.db.prepare('DELETE FROM settings WHERE key = ?').run(AYCD_KEY_SETTING)
+    void this.stopAycdWatch()
+  }
+
+  /** Never exposed over IPC: reading the key has to be a deliberate act inside
+   *  this process, exactly as with account passwords. */
+  private aycdApiKey(): string | null {
+    const cipher = this.getSetting(AYCD_KEY_SETTING)
+    if (!cipher) return null
+    try {
+      return this.encryptor.decrypt(cipher)
+    } catch {
+      return null
+    }
+  }
+
+  /** The addresses Inbox should watch. Stored as JSON so the set survives a
+   *  restart; a malformed value is treated as none rather than as a crash. */
+  listAycdAddresses(): string[] {
+    const raw = this.getSetting(AYCD_ADDRESSES_SETTING)
+    if (!raw) return []
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : []
+    } catch {
+      return []
+    }
+  }
+
+  setAycdAddresses(addresses: string[]): string[] {
+    const cleaned = [...new Set(
+      addresses.map((address) => address.trim().toLowerCase()).filter((address) => address.length > 0),
+    )]
+    this.setSetting(AYCD_ADDRESSES_SETTING, JSON.stringify(cleaned))
+    this.aycd?.setAddresses(cleaned)
+    return cleaned
+  }
+
+  /** Confirms the key works and that the Inbox desktop application is running. */
+  async verifyAycd(): Promise<{ ok: boolean; message: string }> {
+    const apiKey = this.aycdApiKey()
+    if (!apiKey) return { ok: false, message: 'No AYCD Inbox API key is stored.' }
+    return new AycdClient({ apiKey }).verify()
+  }
+
+  /**
+   * Starts capturing mail as it arrives.
+   *
+   * Inbox is forward-looking: this catches what lands from now on and can never
+   * fetch what already has. It complements the IMAP sync rather than replacing
+   * it, so both can run at once.
+   *
+   * The transport and clock are injectable purely so tests can drive the loop
+   * without a network or a timer; the application passes neither.
+   */
+  startAycdWatch(
+    overrides: { transport?: InboxTransport; clock?: WatcherClock } = {},
+  ): { started: boolean; message: string } {
+    if (this.aycd?.status().running) {
+      return { started: true, message: 'AYCD Inbox capture is already running.' }
+    }
+
+    const apiKey = this.aycdApiKey()
+    if (!apiKey && !overrides.transport) {
+      return { started: false, message: 'No AYCD Inbox API key is stored.' }
+    }
+
+    const addresses = this.listAycdAddresses()
+    if (addresses.length === 0) {
+      return { started: false, message: 'No addresses are set for AYCD Inbox to watch.' }
+    }
+
+    this.aycd = new AycdWatcher({
+      client: overrides.transport ?? new AycdClient({ apiKey: apiKey! }),
+      clock: overrides.clock ?? systemClock,
+      addresses,
+      onEvent: (captured) => this.recordAycdCapture(captured),
+      onError: (message) => this.setSetting(AYCD_ERROR_SETTING, message),
+    })
+    this.aycd.start()
+    return { started: true, message: `Watching ${addresses.length} address(es) for new mail.` }
+  }
+
+  /** The watcher is kept after stopping so its tally stays readable; only a
+   *  fresh `startAycdWatch` replaces it. */
+  async stopAycdWatch(): Promise<void> {
+    if (!this.aycd) return
+    this.aycd.stop()
+    await this.aycd.drain()
+  }
+
+  aycdStatus(): AycdStatusView {
+    const status = this.aycd?.status()
+    return {
+      configured: this.getSetting(AYCD_KEY_SETTING) !== null,
+      running: status?.running ?? false,
+      addresses: status?.addresses ?? this.listAycdAddresses(),
+      templates: status?.templates ?? AYCD_TASK_BUILDERS.length,
+      activeTasks: status?.activeTasks ?? 0,
+      registered: status?.registered ?? 0,
+      succeeded: status?.succeeded ?? 0,
+      timedOut: status?.timedOut ?? 0,
+      errored: status?.errored ?? 0,
+      events: status?.events ?? 0,
+      lastPollAt: status?.lastPollAt ?? null,
+      lastError: status?.lastError ?? this.getSetting(AYCD_ERROR_SETTING),
+    }
+  }
+
+  /**
+   * Stores one capture.
+   *
+   * Inbox returns extracted fields and no message, so there is nothing to
+   * retain and nothing to re-parse later. A stand-in message row is written
+   * anyway, because events hang off one and because it gives the capture a
+   * place in the pipeline; its content hash is the Inbox task id, which makes
+   * recording the same capture twice a no-op.
+   */
+  private recordAycdCapture(captured: CapturedEvent): void {
+    const now = new Date().toISOString()
+    const { event } = captured
+    const message = this.messages.upsert({
+      accountId: 'local-import',
+      uid: 0,
+      folder: 'AYCD',
+      messageId: null,
+      contentHash: hashContent(`aycd:${captured.taskId}`),
+      fromAddress: `${event.retailer}@aycd-inbox`,
+      fromName: 'AYCD Inbox',
+      subject: `${event.retailer} ${event.type} ${event.externalOrderId ?? '(no reference)'}`,
+      receivedAt: event.occurredAt,
+      rawPath: '',
+      bodyPreview: JSON.stringify(event.payload).slice(0, 400),
+    })
+
+    this.events.replaceForMessage(message.id, captured.builderId, [event], now)
+    this.messages.markParsed(message.id, captured.builderId, now)
+    this.reconciler.run(now)
+  }
+
   summary(): SummaryView {
     const purchases = this.listPurchases()
     const spend = purchases.reduce((sum, purchase) => sum + purchase.totalMinor, 0)
@@ -485,6 +678,7 @@ export interface ShipmentView {
   postalCode: string | null
   city: string | null
   dhlRedirectable: boolean
+  linkedToPurchase: boolean
 }
 
 export interface PurchaseView {
@@ -500,6 +694,7 @@ export interface PurchaseView {
   totalMinor: number
   totalsConsistent: boolean
   status: string
+  refundOutstanding: string | null
 }
 
 export interface CancellationView {
@@ -541,6 +736,21 @@ export interface ItemView {
   location: string | null
   retailer: string | null
   orderRef: string | null
+}
+
+export interface AycdStatusView {
+  configured: boolean
+  running: boolean
+  addresses: string[]
+  templates: number
+  activeTasks: number
+  registered: number
+  succeeded: number
+  timedOut: number
+  errored: number
+  events: number
+  lastPollAt: string | null
+  lastError: string | null
 }
 
 export interface SummaryView {
