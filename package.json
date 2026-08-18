@@ -1,6 +1,6 @@
 {
   "name": "dysros",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Local-first desktop tracker for a reselling operation: reads your mailboxes and turns order, shipping, cancellation and refund mail into inventory, purchases and shipments.",
   "scripts": {
     "test": "vitest run",
@@ -57,6 +57,7 @@
     },
     "files": [
       "dist/**/*",
+      "build/icon.ico",
       "package.json"
     ],
     "asarUnpack": [
@@ -71,13 +72,20 @@
           ]
         }
       ],
-      "artifactName": "${productName}-${version}-${arch}.${ext}"
+      "artifactName": "${productName}-${version}-${arch}.${ext}",
+      "icon": "build/icon.ico"
     },
     "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
+      "oneClick": true,
       "perMachine": false,
-      "deleteAppDataOnUninstall": false
+      "allowToChangeInstallationDirectory": false,
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Resell Ops",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
     },
     "publish": [
       {
