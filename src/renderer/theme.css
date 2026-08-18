@@ -391,3 +391,29 @@ a:hover { color: var(--accent-bright); }
 }
 .field-input:focus { border-color: #3a4a6a; }
 .field-input::placeholder { color: var(--text-ghost); }
+
+/* Skeletons ---------------------------------------------------------------- */
+
+@keyframes skeletonSheen {
+  0%   { background-position: 200% 0 }
+  100% { background-position: -200% 0 }
+}
+
+.skeleton {
+  display: block;
+  background: linear-gradient(
+    90deg,
+    #1a2030 25%,
+    #232b3d 37%,
+    #1a2030 63%
+  );
+  background-size: 200% 100%;
+  animation: skeletonSheen 1.4s ease-in-out infinite;
+}
+
+/* Respect a system preference for reduced motion: a sheen that never stops is
+   exactly the kind of movement that setting exists to suppress. */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton { animation: none; background: #1a2030; }
+  .banner-dot, .win-update-dot { animation: none !important; }
+}

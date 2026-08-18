@@ -37,6 +37,13 @@ export interface NewAccountInput {
   username: string; password: string
 }
 
+export interface SyncProgress {
+  account: string
+  done: number
+  stored: number
+  subject: string
+}
+
 export interface LogEntryView {
   at: string
   level: 'error' | 'warn' | 'info'
@@ -108,6 +115,7 @@ interface Api {
   logOpenFolder(): Promise<void>
   crashReportUrl(index: number): Promise<{ url: string; signature: string; title: string } | null>
   reportRendererError(message: string, detail: string): Promise<LogEntryView>
+  onSyncProgress(handler: (p: SyncProgress) => void): () => void
   onCrash(handler: (entry: LogEntryView) => void): () => void
   deleteAllData(includeAccounts: boolean): Promise<{
     deleted: boolean; messages?: number; events?: number; purchases?: number; items?: number

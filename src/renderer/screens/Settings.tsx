@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { api } from '../api.js'
+import { Confirm } from '../Confirm.js'
 import { Accounts } from './Accounts.js'
 import { AycdPanel } from './AycdPanel.js'
 import { DiscordPanel } from './DiscordPanel.js'
@@ -20,9 +21,42 @@ export function Settings({
   const [wiping, setWiping] = useState(false)
   const [wipeNote, setWipeNote] = useState<string | null>(null)
   const [alsoAccounts, setAlsoAccounts] = useState(false)
+  const [confirming, setConfirming] = useState(false)
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 13, maxWidth: 920 }}>
+      {confirming && (
+        <Confirm
+          title="Delete all data"
+          destructive
+          confirmLabel="Delete everything"
+          onCancel={() => setConfirming(false)}
+          onConfirm={async () => {
+            setConfirming(false)
+            setWiping(true)
+            setWipeNote(null)
+            try {
+              const result = await api.deleteAllData(alsoAccounts)
+              setWipeNote(
+                `Deleted ${result.messages} messages, ${result.purchases} purchases and ${result.items} items.`,
+              )
+              onAccountsChanged()
+            } finally {
+              setWiping(false)
+            }
+          }}
+          body={
+            <>
+              Inventory, purchases, shipments, events and the stored copies of your mail will be
+              removed{alsoAccounts ? ', and every mailbox disconnected' : ''}. This cannot be
+              undone.
+              <br /><br />
+              Your actual mailbox is untouched — syncing again re-collects everything.
+            </>
+          }
+        />
+      )}
+
       <Accounts onChanged={onAccountsChanged} onSync={onSync} syncing={syncing} />
 
       <AycdPanel />
@@ -104,21 +138,7 @@ export function Settings({
             className="btn"
             disabled={wiping}
             style={{ borderColor: '#43303a', color: 'var(--pink)' }}
-            onClick={async () => {
-              setWiping(true)
-              setWipeNote(null)
-              try {
-                const result = await api.deleteAllData(alsoAccounts)
-                setWipeNote(
-                  result.deleted
-                    ? `Deleted ${result.messages} messages, ${result.purchases} purchases and ${result.items} items.`
-                    : 'Cancelled — nothing was deleted.',
-                )
-                onAccountsChanged()
-              } finally {
-                setWiping(false)
-              }
-            }}
+            onClick={() => setConfirming(true)}
           >
             {wiping ? 'Deleting…' : 'Delete all data'}
           </button>

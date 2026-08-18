@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type ReviewView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
+import { SkeletonCards } from '../Skeleton.js'
 
 export function Review() {
   const [items, setItems] = useState<ReviewView[] | null>(null)
@@ -11,7 +12,7 @@ export function Review() {
 
   const paged = usePaged(items ?? [], 'review')
 
-  if (!items) return <div className="empty"><span className="empty-body">Loading…</span></div>
+  if (!items) return <SkeletonCards count={4} height={128} />
 
   if (items.length === 0) {
     return (

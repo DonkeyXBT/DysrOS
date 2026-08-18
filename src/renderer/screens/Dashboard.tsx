@@ -1,4 +1,5 @@
 import type { SummaryView } from '../api.js'
+import { SkeletonDashboard } from '../Skeleton.js'
 
 export function Dashboard({
   summary,
@@ -7,7 +8,7 @@ export function Dashboard({
   summary: SummaryView | null
   onSync: () => void
 }) {
-  if (!summary) return <Skeleton />
+  if (!summary) return <SkeletonDashboard />
 
   if (summary.messageCount === 0) {
     return (
@@ -187,22 +188,6 @@ function Breakdown({ label, value }: { label: string; value: string }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
       <div className="stat-label">{label}</div>
       <div className="stat-small">{value}</div>
-    </div>
-  )
-}
-
-function Skeleton() {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {[64, 120, 120, 90].map((height, index) => (
-        <div
-          key={index}
-          style={{
-            height, borderRadius: 'var(--r-section)', background: '#141824',
-            border: '1px solid var(--border)', opacity: .5,
-          }}
-        />
-      ))}
     </div>
   )
 }

@@ -50,6 +50,7 @@ export function App() {
   const [updaterOpen, setUpdaterOpen] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [crashCount, setCrashCount] = useState(0)
+  const [progress, setProgress] = useState<{ done: number; stored: number; subject: string } | null>(null)
 
   const refresh = useCallback(async () => {
     setSummary(await api.summary())
@@ -63,6 +64,9 @@ export function App() {
       void refresh()
     })
     const offCrash = api.onCrash(() => setCrashCount((n) => n + 1))
+    // Each message reports as it lands, so a long sync shows movement rather
+    // than sitting still until it finishes.
+    const offProgress = api.onSyncProgress((p) => setProgress(p))
 
     // A renderer fault should reach the same log as everything else, rather
     // than disappearing into a console nobody has open.
@@ -82,6 +86,7 @@ export function App() {
     return () => {
       offMail()
       offCrash()
+      offProgress()
       window.removeEventListener('error', onError)
       window.removeEventListener('unhandledrejection', onRejection)
     }
@@ -96,6 +101,7 @@ export function App() {
     if (syncing) return
     setSyncing(true)
     setFlash(null)
+    setProgress(null)
     try {
       const result = await api.syncAccounts()
       setFlash(
@@ -111,6 +117,7 @@ export function App() {
       setFlash(error instanceof Error ? error.message : String(error))
     } finally {
       setSyncing(false)
+      setProgress(null)
     }
   }, [refresh, syncing])
 
@@ -165,9 +172,21 @@ export function App() {
             />
             <span className="sync-title">{syncing ? 'Syncing mail' : 'Sync now'}</span>
           </div>
+          {syncing && progress?.subject && (
+            <div
+              style={{
+                fontSize: 10, color: 'var(--text-ghost)', whiteSpace: 'nowrap',
+                overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
+              }}
+            >
+              {progress.subject}
+            </div>
+          )}
           <div className="sync-detail">
             {syncing
-              ? 'Running in the background, you can keep working'
+              ? progress
+                ? `${progress.done} read · ${progress.stored} new`
+                : 'Connecting…'
               : summary
                 ? `${summary.messageCount} message${summary.messageCount === 1 ? '' : 's'} · ${summary.eventCount} events`
                 : 'Starting up'}
