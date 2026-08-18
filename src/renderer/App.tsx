@@ -9,6 +9,7 @@ import { Placeholder } from './screens/Placeholder.js'
 import { Logs } from './screens/Logs.js'
 import { TitleBar } from './TitleBar.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
+import type { AppNotification } from './Notifications.js'
 import { Updater } from './Updater.js'
 
 /** Nav order and per-item hue, both taken from the mockup. */
@@ -51,6 +52,23 @@ export function App() {
   const [syncing, setSyncing] = useState(false)
   const [crashCount, setCrashCount] = useState(0)
   const [progress, setProgress] = useState<{ done: number; stored: number; subject: string } | null>(null)
+  /**
+   * Bumped whenever stored data changes. Screens depend on it, so a sync
+   * running in the background updates what you are looking at instead of
+   * requiring the application to be restarted.
+   */
+  const [dataVersion, setDataVersion] = useState(0)
+  const [notifications, setNotifications] = useState<AppNotification[]>([])
+  const [unread, setUnread] = useState(0)
+  const [bellOpen, setBellOpen] = useState(false)
+
+  const notify = useCallback((level: AppNotification['level'], text: string) => {
+    setNotifications((current) => [
+      { id: Date.now() + Math.floor(performance.now()), at: new Date().toISOString(), level, text },
+      ...current,
+    ].slice(0, 50))
+    setUnread((n) => n + 1)
+  }, [])
 
   const refresh = useCallback(async () => {
     setSummary(await api.summary())
@@ -62,8 +80,12 @@ export function App() {
     // follows along rather than asking anyone to import anything.
     const offMail = api.onMailUpdated(() => {
       void refresh()
+      setDataVersion((n) => n + 1)
     })
-    const offCrash = api.onCrash(() => setCrashCount((n) => n + 1))
+    const offCrash = api.onCrash((entry) => {
+      setCrashCount((n) => n + 1)
+      notify('error', entry?.message ? `Something failed: ${entry.message}` : 'Something failed')
+    })
     // Each message reports as it lands, so a long sync shows movement rather
     // than sitting still until it finishes.
     const offProgress = api.onSyncProgress((p) => setProgress(p))
@@ -90,7 +112,7 @@ export function App() {
       window.removeEventListener('error', onError)
       window.removeEventListener('unhandledrejection', onRejection)
     }
-  }, [refresh])
+  }, [refresh, notify])
 
   /**
    * Syncing lives here rather than on the Settings screen, so switching screens
@@ -104,26 +126,39 @@ export function App() {
     setProgress(null)
     try {
       const result = await api.syncAccounts()
-      setFlash(
-        result.failures.length > 0
-          ? `${result.failures[0]!.email}: ${result.failures[0]!.error}`
-          : result.accounts === 0
-            ? 'No mailbox connected yet - add one in Settings.'
-            : `Pulled ${result.fetched} message${result.fetched === 1 ? '' : 's'} from ` +
-              `${result.accounts} account${result.accounts === 1 ? '' : 's'} - ${result.stored} new`,
-      )
+      const message = result.failures.length > 0
+        ? `${result.failures[0]!.email}: ${result.failures[0]!.error}`
+        : result.accounts === 0
+          ? 'No mailbox connected yet - add one in Settings.'
+          : `Pulled ${result.fetched} message${result.fetched === 1 ? '' : 's'} from ` +
+            `${result.accounts} account${result.accounts === 1 ? '' : 's'} - ${result.stored} new`
+      setFlash(message)
+      notify(result.failures.length > 0 ? 'warn' : 'info', message)
       await refresh()
     } catch (error) {
-      setFlash(error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      setFlash(message)
+      notify('error', message)
     } finally {
       setSyncing(false)
       setProgress(null)
     }
-  }, [refresh, syncing])
+  }, [refresh, syncing, notify])
 
   return (
     <div className="app">
-      <TitleBar screen={screen} onOpenUpdater={() => setUpdaterOpen(true)} />
+      <TitleBar
+        screen={screen}
+        onOpenUpdater={() => setUpdaterOpen(true)}
+        notifications={notifications}
+        unread={unread}
+        notificationsOpen={bellOpen}
+        onToggleNotifications={() => {
+          setBellOpen((open) => !open)
+          setUnread(0)
+        }}
+        onCloseNotifications={() => setBellOpen(false)}
+      />
       {updaterOpen && <Updater onClose={() => setUpdaterOpen(false)} />}
       <div className="shell">
       <aside className="sidebar">
@@ -231,13 +266,16 @@ export function App() {
           {/* Keyed by screen so moving to another screen clears a failed one. */}
           <ErrorBoundary area={screen} key={screen} onReset={() => void refresh()}>
           {screen === 'Dashboard' && <Dashboard summary={summary} onSync={syncNow} />}
-          {screen === 'Shipments' && <Shipments query={query} />}
-          {screen === 'Purchases' && <Purchases query={query} />}
-          {screen === 'Review' && <Review />}
+          {screen === 'Shipments' && <Shipments query={query} dataVersion={dataVersion} />}
+          {screen === 'Purchases' && <Purchases query={query} dataVersion={dataVersion} />}
+          {screen === 'Review' && <Review dataVersion={dataVersion} />}
           {screen === 'Logs' && <Logs />}
           {screen === 'Settings' && (
             <Settings
-              onAccountsChanged={refresh}
+              onAccountsChanged={() => {
+                void refresh()
+                setDataVersion((n) => n + 1)
+              }}
               onSync={syncNow}
               syncing={syncing}
               onOpenLogs={() => {

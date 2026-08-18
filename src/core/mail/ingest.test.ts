@@ -23,6 +23,7 @@ function fakeMailbox(options: {
   onFetch?: (afterUid: number) => void
   /** Lowest UID inside the lookback window, as a date search would report. */
   firstRecentUid?: number | null
+  onSearch?: (since: Date) => void
 }): MailboxClient & { closed: boolean } {
   return {
     closed: false,
@@ -30,7 +31,8 @@ function fakeMailbox(options: {
     async openFolder() {
       return { uidValidity: options.uidValidity }
     },
-    async firstUidSince() {
+    async firstUidSince(since: Date) {
+      options.onSearch?.(since)
       return options.firstRecentUid === undefined ? 1 : options.firstRecentUid
     },
     async fetchSince(afterUid, limit) {
@@ -245,5 +247,64 @@ describe('first sync window', () => {
     expect(askedFor).toBe(30)
     expect(second.startedFresh).toBe(false)
     expect(second.fetched).toBe(1)
+  })
+})
+
+describe('lookback window', () => {
+  it('asks the server for one week of mail on a first sync', async () => {
+    let searchedSince: Date | null = null
+    const mailbox = fakeMailbox({
+      uidValidity: 100,
+      messages: [msg(1)],
+      onSearch: (since) => {
+        searchedSince = since
+      },
+    })
+    const { sink } = recordingSink()
+
+    await sync.sync('acc1', 'INBOX', mailbox, sink)
+
+    const days = (Date.now() - searchedSince!.getTime()) / 86_400_000
+    // A busy mailbox holds thousands of messages a month; a first run that
+    // grinds through them all reads as broken.
+    expect(days).toBeGreaterThan(6.9)
+    expect(days).toBeLessThan(7.1)
+  })
+
+  it('honours an explicit window when one is given', async () => {
+    let searchedSince: Date | null = null
+    const mailbox = fakeMailbox({
+      uidValidity: 100,
+      messages: [msg(1)],
+      onSearch: (since) => {
+        searchedSince = since
+      },
+    })
+    const { sink } = recordingSink()
+
+    await sync.sync('acc1', 'INBOX', mailbox, sink, { initialLookbackDays: 60 })
+
+    const days = (Date.now() - searchedSince!.getTime()) / 86_400_000
+    expect(days).toBeGreaterThan(59.9)
+  })
+
+  it('does not search by date once a cursor exists', async () => {
+    let searches = 0
+    const messages = [msg(1), msg(2)]
+    const mailbox = fakeMailbox({
+      uidValidity: 100,
+      messages,
+      onSearch: () => {
+        searches += 1
+      },
+    })
+    const { sink } = recordingSink()
+
+    await sync.sync('acc1', 'INBOX', mailbox, sink)
+    messages.push(msg(3))
+    await sync.sync('acc1', 'INBOX', mailbox, sink)
+
+    // The second run resumes from the cursor, so the window is irrelevant.
+    expect(searches).toBe(1)
   })
 })

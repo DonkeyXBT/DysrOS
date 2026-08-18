@@ -3,12 +3,12 @@ import { api, type ReviewView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
 import { SkeletonCards } from '../Skeleton.js'
 
-export function Review() {
+export function Review({ dataVersion }: { dataVersion: number }) {
   const [items, setItems] = useState<ReviewView[] | null>(null)
 
   useEffect(() => {
     void api.review().then(setItems)
-  }, [])
+  }, [dataVersion])
 
   const paged = usePaged(items ?? [], 'review')
 

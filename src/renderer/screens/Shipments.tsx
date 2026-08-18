@@ -31,14 +31,14 @@ const STATUS_LABEL: Record<string, string> = {
   unknown: 'Unknown',
 }
 
-export function Shipments({ query }: { query: string }) {
+export function Shipments({ query, dataVersion }: { query: string; dataVersion: number }) {
   const [shipments, setShipments] = useState<ShipmentView[] | null>(null)
   const [selected, setSelected] = useState<ShipmentView | null>(null)
   const [exported, setExported] = useState<string | null>(null)
 
   useEffect(() => {
     void api.shipments().then(setShipments)
-  }, [])
+  }, [dataVersion])
 
   const term = query.trim().toLowerCase()
   const rows = (shipments ?? []).filter(
