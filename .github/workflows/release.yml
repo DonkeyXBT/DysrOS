@@ -82,8 +82,21 @@ jobs:
         run: |
           # The release note is the tag's own subject line, kept to a short
           # phrase. Anything longer belongs in the commit history, not here.
-          NOTE=$(git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME")
-          if [ -z "$NOTE" ]; then NOTE="General improvements"; fi
+          #
+          # actions/checkout leaves annotated tags as lightweight refs, and
+          # reading contents:subject off one of those returns the *commit*
+          # subject instead. Re-fetching the tag object restores the annotation.
+          git fetch --force --tags origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME" || true
+
+          NOTE=$(git for-each-ref "refs/tags/$GITHUB_REF_NAME" --format='%(contents:subject)')
+          COMMIT_SUBJECT=$(git log -1 --format='%s')
+
+          # A lightweight tag reports the commit subject; that is not a release
+          # note, so fall back to the generic phrase rather than publishing it.
+          if [ -z "$NOTE" ] || [ "$NOTE" = "$COMMIT_SUBJECT" ]; then
+            NOTE="General improvements"
+          fi
+          echo "Release note: $NOTE"
 
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME"               --title "${GITHUB_REF_NAME#v}"               --notes "$NOTE"               --verify-tag
