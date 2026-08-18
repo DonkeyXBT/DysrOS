@@ -8,3 +8,4 @@ dist/
 design/**/uploads/
 launch-check.mjs
 release/
+release/

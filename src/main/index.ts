@@ -52,6 +52,7 @@ function createWindow(): void {
     backgroundColor: '#0b0d12',
     // The design draws its own title bar, so the native frame is removed.
     frame: false,
+    icon: join(app.getAppPath(), 'build', 'icon.ico'),
     show: false,
     webPreferences: {
       preload: join(__dirname, 'preload.cjs'),
