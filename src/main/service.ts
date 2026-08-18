@@ -19,6 +19,7 @@ import { AccountRepo, type Encryptor, type MailAccount, type NewAccount } from '
 import { MailboxSync } from '../core/mail/ingest.js'
 import { ImapFlowClient, testConnection, explainConnectionError } from '../core/mail/imapflow-client.js'
 import { AycdClient } from '../core/aycd/client.js'
+import { resolveTrackingLink, isNonCarrierBolLanding } from '../core/tracking/resolve-link.js'
 import {
   sendToDiscord, sampleNotification, isWebhookUrl, maskWebhookUrl,
   type NotifiableEvent, type NotificationInput,
@@ -659,6 +660,70 @@ export class AppService {
     }
 
     return before
+  }
+
+  /**
+   * Turns retailer redirect links into real carrier barcodes.
+   *
+   * The retailer never states the barcode in the mail — only a tokenised
+   * redirect that lands on the carrier's own page, where the code is in the
+   * URL. That costs one request per parcel, so it runs as its own pass rather
+   * than during parsing: ingestion stays offline, and a network failure can
+   * never corrupt a parsed event.
+   *
+   * A parcel that fails is simply left for the next pass. Nothing is guessed.
+   */
+  async resolveTrackingCodes(
+    options: { limit?: number; onProgress?: (done: number, total: number) => void } = {},
+  ): Promise<{ attempted: number; resolved: number; failed: number }> {
+    const limit = options.limit ?? 40
+
+    const rows = this.db.prepare(
+      `SELECT s.id, e.payload_json
+       FROM shipments s
+       JOIN events e ON e.id = s.id
+       WHERE s.tracking_number IS NULL
+       ORDER BY s.created_at DESC
+       LIMIT ?`,
+    ).all(limit) as { id: string; payload_json: string }[]
+
+    let resolved = 0
+    let failed = 0
+
+    for (const [index, row] of rows.entries()) {
+      const payload = JSON.parse(row.payload_json) as Record<string, unknown>
+      const candidates = Array.isArray(payload.trackingCandidates)
+        ? (payload.trackingCandidates as string[])
+        : [payload.trackingUrl as string].filter(Boolean)
+
+      let found: { carrier: string; trackingNumber: string; finalUrl: string } | null = null
+      for (const candidate of candidates) {
+        const result = await resolveTrackingLink(candidate)
+        // Landing on the retailer's own login page means this link was never a
+        // tracking link; try the next candidate rather than giving up.
+        if (result && !isNonCarrierBolLanding(result.finalUrl)) {
+          found = result
+          break
+        }
+      }
+
+      if (found) {
+        this.db.prepare(
+          `UPDATE shipments
+           SET tracking_number = ?, carrier = ?, status = 'in_transit', last_polled_at = ?
+           WHERE id = ?`,
+        ).run(found.trackingNumber, found.carrier, new Date().toISOString(), row.id)
+        resolved += 1
+      } else {
+        this.db.prepare('UPDATE shipments SET last_polled_at = ? WHERE id = ?')
+          .run(new Date().toISOString(), row.id)
+        failed += 1
+      }
+
+      options.onProgress?.(index + 1, rows.length)
+    }
+
+    return { attempted: rows.length, resolved, failed }
   }
 
   // ---- Discord notifications ----------------------------------------------

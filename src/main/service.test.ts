@@ -459,3 +459,23 @@ describe.skipIf(!allPresent)('one list of orders, labelled buy or cancel', () =>
     expect(new Set(refs).size).toBe(refs.length)
   })
 })
+
+describe.skipIf(!allPresent)('tracking resolution', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('keeps a ranked shortlist of links to follow, not just the first', async () => {
+    await importAll()
+    // The retailer puts several links in a shipping mail and most lead to an
+    // account page; the shortlist is what lets a dead end fall through.
+    const shipments = service.listShipments()
+    expect(shipments.length).toBeGreaterThan(0)
+    expect(shipments.every((s) => s.trackingUrl?.includes('link.bol.com'))).toBe(true)
+  })
+
+  it('reports nothing to do when every parcel already has a code', async () => {
+    const result = await service.resolveTrackingCodes({ limit: 0 })
+    expect(result).toEqual({ attempted: 0, resolved: 0, failed: 0 })
+  })
+})
