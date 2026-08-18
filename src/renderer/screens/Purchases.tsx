@@ -1,7 +1,27 @@
 import { useEffect, useState } from 'react'
 import { api, type CancellationView, type PurchaseView } from '../api.js'
 
-const COLUMNS = '110px 130px 96px minmax(180px,1fr) 54px 90px 90px 96px 130px'
+const COLUMNS = '110px 130px 96px minmax(170px,1fr) 46px 88px 88px 94px 118px 110px'
+
+const STATUS_COLOR: Record<string, string> = {
+  pending: 'oklch(0.68 0.02 265)',
+  confirmed: 'oklch(0.76 0.11 225)',
+  shipped: 'oklch(0.78 0.11 195)',
+  delivered: 'oklch(0.78 0.12 148)',
+  cancelled: 'oklch(0.62 0.015 265)',
+  refunded: 'oklch(0.74 0.10 60)',
+  partially_refunded: 'oklch(0.74 0.12 40)',
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  pending: 'Pending',
+  confirmed: 'Confirmed',
+  shipped: 'Shipped',
+  delivered: 'Delivered',
+  cancelled: 'Cancelled',
+  refunded: 'Refunded',
+  partially_refunded: 'Part. refunded',
+}
 
 export function Purchases({ query }: { query: string }) {
   const [purchases, setPurchases] = useState<PurchaseView[] | null>(null)
@@ -23,8 +43,6 @@ export function Purchases({ query }: { query: string }) {
           p.retailer.toLowerCase().includes(term),
       )
     : purchases
-
-  const cancelledRefs = new Set(cancellations.map((c) => c.reference))
 
   if (purchases.length === 0 && cancellations.length === 0) {
     return (
@@ -89,6 +107,7 @@ export function Purchases({ query }: { query: string }) {
             <div style={{ textAlign: 'right' }}>Unit</div>
             <div style={{ textAlign: 'right' }}>Shipping</div>
             <div style={{ textAlign: 'right' }}>Total</div>
+            <div>Status</div>
             <div>Checks</div>
           </div>
           {rows.map((purchase) => (
@@ -114,14 +133,28 @@ export function Purchases({ query }: { query: string }) {
               <div className="cell-right" style={{ fontSize: 12.5, fontWeight: 600 }}>
                 {purchase.total}
               </div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <div>
+                <span
+                  className="chip"
+                  style={{
+                    color: STATUS_COLOR[purchase.status] ?? 'var(--text-dim)',
+                    background: `color-mix(in oklab, ${STATUS_COLOR[purchase.status] ?? '#8d94a6'} 14%, transparent)`,
+                    border: `1px solid color-mix(in oklab, ${STATUS_COLOR[purchase.status] ?? '#8d94a6'} 30%, transparent)`,
+                  }}
+                >
+                  {STATUS_LABEL[purchase.status] ?? purchase.status}
+                </span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {purchase.totalsConsistent ? (
                   <span style={{ fontSize: 11, color: 'var(--teal)' }}>totals check out</span>
                 ) : (
                   <span style={{ fontSize: 11, color: 'var(--warm)' }}>totals disagree</span>
                 )}
-                {cancelledRefs.has(purchase.reference) && (
-                  <span style={{ fontSize: 11, color: 'var(--pink)' }}>cancelled</span>
+                {purchase.refundOutstanding && (
+                  <span className="mono" style={{ fontSize: 11, color: 'var(--pink)' }}>
+                    {purchase.refundOutstanding} refund due
+                  </span>
                 )}
               </div>
             </div>

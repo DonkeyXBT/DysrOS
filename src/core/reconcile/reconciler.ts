@@ -78,14 +78,19 @@ export class Reconciler {
     this.db.prepare(
       `INSERT INTO purchases
          (id, retailer, external_order_id, ordered_at, status, currency,
-          subtotal_minor, shipping_minor, vat_minor, total_minor, created_at)
-       VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?, 0, ?, ?)
+          subtotal_minor, shipping_minor, vat_minor, total_minor,
+          totals_consistent, title, created_at)
+       VALUES (?, ?, ?, ?, 'confirmed', ?, ?, ?, 0, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          ordered_at = excluded.ordered_at,
          currency = excluded.currency,
          subtotal_minor = excluded.subtotal_minor,
          shipping_minor = excluded.shipping_minor,
-         total_minor = excluded.total_minor`,
+         total_minor = excluded.total_minor,
+         totals_consistent = excluded.totals_consistent,
+         title = excluded.title,
+         -- A re-parse must not undo a cancellation already applied.
+         status = CASE WHEN purchases.status = 'cancelled' THEN 'cancelled' ELSE excluded.status END`,
     ).run(
       purchaseId,
       event.retailer,
@@ -95,6 +100,8 @@ export class Reconciler {
       unitMinor * quantity,
       Number(payload.shippingMinor ?? 0),
       Number(payload.totalMinor ?? 0),
+      payload.totalsConsistent ? 1 : 0,
+      (payload.title as string | null) ?? null,
       now,
     )
 

@@ -4,11 +4,13 @@ export interface ShipmentView {
   linked: string; title: string | null; quantity: number; status: string
   lastMovementAt: string | null; expectedDeliveryAt: string | null
   postalCode: string | null; city: string | null; dhlRedirectable: boolean
+  linkedToPurchase: boolean
 }
 export interface PurchaseView {
   id: string; retailer: string; reference: string | null; orderedAt: string
   title: string | null; quantity: number; unit: string; shipping: string
   total: string; totalMinor: number; totalsConsistent: boolean; status: string
+  refundOutstanding: string | null
 }
 export interface CancellationView {
   id: string; retailer: string; reference: string | null

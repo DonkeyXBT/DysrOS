@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AppService } from './service.js'
+import type { CompletedTask, MailTask } from '../core/aycd/client.js'
+import type { WatcherClock } from '../core/aycd/watcher.js'
 
 const FIXTURES = [
   'Bedankt voor je bestelling.eml',
@@ -166,5 +168,250 @@ describe.skipIf(!allPresent)('reconciled inventory', () => {
     const before = service.listInventory().length
     await importAll()
     expect(service.listInventory()).toHaveLength(before)
+  })
+})
+
+/**
+ * AYCD Inbox capture. No network and no real timers: the transport and the
+ * clock are injected, and the loop runs exactly as many polls as the fake clock
+ * allows before it stops the watcher.
+ */
+class FakeInbox {
+  readonly created: { id: string; task: MailTask }[] = []
+  private counter = 0
+  private readonly staged: { match: (task: MailTask) => boolean; results: Record<string, string> }[] = []
+
+  async createTask(task: MailTask): Promise<{ id: string }> {
+    this.counter += 1
+    const id = `task_${this.counter}`
+    this.created.push({ id, task })
+    return { id }
+  }
+
+  async completedTasks(): Promise<CompletedTask[]> {
+    return this.staged.flatMap((entry) => {
+      const registered = this.created.find((candidate) => entry.match(candidate.task))
+      return registered
+        ? [{ id: registered.id, status: 'success' as const, results: entry.results }]
+        : []
+    })
+  }
+
+  /** Stages a result against whichever registered task matches. */
+  complete(match: (task: MailTask) => boolean, results: Record<string, string>): void {
+    this.staged.push({ match, results })
+  }
+}
+
+const isBolOrderTask = (task: MailTask): boolean =>
+  task.mailFilters.some((filter) => filter.value === 'automail@bol.com')
+  && task.mailFilters.some((filter) => filter.value === 'bestelling')
+
+const BOL_CAPTURE = {
+  orderRef: 'C0008N401L',
+  title: 'LEGO Star Wars 75192',
+  quantity: '1 x €',
+  unitPrice: '11,99',
+  shipping: '0,00',
+  total: '11,99',
+}
+
+/** Stops the watcher after its first sleep, so `start` runs exactly one poll. */
+function oneShotClock(stop: () => void): WatcherClock {
+  let current = Date.UTC(2026, 6, 1, 10, 0, 0)
+  return {
+    now: () => current,
+    async sleep(ms) {
+      current += ms
+      stop()
+    },
+  }
+}
+
+async function captureOnce(target: AppService, inbox: FakeInbox): Promise<void> {
+  const clock = oneShotClock(() => {
+    void target.stopAycdWatch()
+  })
+  target.startAycdWatch({ transport: inbox, clock })
+  await target.stopAycdWatch()
+}
+
+describe('AppService AYCD Inbox integration', () => {
+  it('reports Inbox as unconfigured until a key is stored', () => {
+    const status = service.aycdStatus()
+    expect(status.configured).toBe(false)
+    expect(status.running).toBe(false)
+    expect(status.templates).toBeGreaterThan(0)
+  })
+
+  it('never stores the API key in plaintext', () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    const stored = service.getSetting('aycd_api_key_cipher')
+
+    expect(stored).not.toBeNull()
+    expect(stored).not.toContain('SECRET-KEY-123')
+    expect(service.aycdStatus().configured).toBe(true)
+  })
+
+  it('forgets the key on request', () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    service.clearAycdApiKey()
+    expect(service.aycdStatus().configured).toBe(false)
+  })
+
+  it('treats a blank key as clearing it rather than storing an empty secret', () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    service.setAycdApiKey('   ')
+    expect(service.aycdStatus().configured).toBe(false)
+  })
+
+  it('normalises and remembers the watched addresses', () => {
+    expect(service.setAycdAddresses([' Orders@Example.com ', 'orders@example.com', '']))
+      .toEqual(['orders@example.com'])
+    expect(service.listAycdAddresses()).toEqual(['orders@example.com'])
+  })
+
+  it('refuses to verify without a key instead of calling out', async () => {
+    await expect(service.verifyAycd()).resolves.toEqual({
+      ok: false,
+      message: 'No AYCD Inbox API key is stored.',
+    })
+  })
+
+  it('will not start without a key or without an address', () => {
+    expect(service.startAycdWatch().started).toBe(false)
+
+    service.setAycdApiKey('SECRET-KEY-123')
+    expect(service.startAycdWatch()).toEqual({
+      started: false,
+      message: 'No addresses are set for AYCD Inbox to watch.',
+    })
+  })
+
+  it('registers a task per template and turns a capture into a purchase', async () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    service.setAycdAddresses(['orders@example.com'])
+    const inbox = new FakeInbox()
+    inbox.complete(isBolOrderTask, BOL_CAPTURE)
+
+    await captureOnce(service, inbox)
+
+    expect(inbox.created.length).toBeGreaterThan(1)
+    const purchases = service.listPurchases()
+    expect(purchases).toHaveLength(1)
+    expect(purchases[0]!.reference).toBe('C0008N401L')
+    expect(purchases[0]!.total).toBe('€11.99')
+    expect(service.listInventory()).toHaveLength(1)
+  })
+
+  it('keeps a capture out of the review queue, since it was recognised', async () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    service.setAycdAddresses(['orders@example.com'])
+    const inbox = new FakeInbox()
+    inbox.complete(isBolOrderTask, BOL_CAPTURE)
+
+    await captureOnce(service, inbox)
+
+    expect(service.listReviewQueue()).toHaveLength(0)
+    expect(service.summary().messageCount).toBe(1)
+  })
+
+  it('records the same capture twice as one, keyed on the Inbox task id', async () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    service.setAycdAddresses(['orders@example.com'])
+
+    for (const _run of [1, 2]) {
+      const inbox = new FakeInbox()
+      inbox.complete(isBolOrderTask, BOL_CAPTURE)
+      await captureOnce(service, inbox)
+    }
+
+    expect(service.summary().messageCount).toBe(1)
+    expect(service.listPurchases()).toHaveLength(1)
+    expect(service.listInventory()).toHaveLength(1)
+  })
+
+  it('reports what the watcher did, and keeps the tally after it stops', async () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    service.setAycdAddresses(['orders@example.com'])
+    const inbox = new FakeInbox()
+    inbox.complete(isBolOrderTask, BOL_CAPTURE)
+
+    await captureOnce(service, inbox)
+
+    const status = service.aycdStatus()
+    expect(status.running).toBe(false)
+    expect(status.succeeded).toBe(1)
+    expect(status.events).toBe(1)
+    // Every other template is still waiting for its retailer's mail.
+    expect(status.activeTasks).toBe(status.templates - 1)
+    expect(status.lastError).toBeNull()
+  })
+
+  it('does not start a second watcher over the top of a running one', async () => {
+    service.setAycdApiKey('SECRET-KEY-123')
+    service.setAycdAddresses(['orders@example.com'])
+    const inbox = new FakeInbox()
+
+    const clock = oneShotClock(() => {})
+    service.startAycdWatch({ transport: inbox, clock })
+    const second = service.startAycdWatch({ transport: inbox, clock })
+
+    expect(second).toEqual({ started: true, message: 'AYCD Inbox capture is already running.' })
+    await service.stopAycdWatch()
+  })
+})
+
+describe.skipIf(!allPresent)('screens read reconciled state, not raw events', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('takes purchase status from the reconciler rather than assuming confirmed', async () => {
+    await importAll()
+    // Previously hardcoded: every order read as "confirmed" no matter what had
+    // happened to it since.
+    const statuses = service.listPurchases().map((p) => p.status)
+    expect(statuses.every((s) => typeof s === 'string' && s.length > 0)).toBe(true)
+    expect(statuses).toEqual(['confirmed', 'confirmed'])
+  })
+
+  it('reports no outstanding refund when none was booked', async () => {
+    await importAll()
+    expect(service.listPurchases().every((p) => p.refundOutstanding === null)).toBe(true)
+  })
+
+  it('carries the item title through to the purchase row', async () => {
+    await importAll()
+    const titles = service.listPurchases().map((p) => p.title)
+    expect(titles.some((t) => t?.startsWith('One Piece'))).toBe(true)
+    expect(titles.some((t) => t?.startsWith('LEGO'))).toBe(true)
+  })
+
+  it('keeps the per-unit price on the purchase, not the order total', async () => {
+    await importAll()
+    const lego = service.listPurchases().find((p) => p.reference === 'C000CXJLHK')!
+    expect(lego.unit).toBe('€53.99')
+    expect(lego.total).toBe('€161.97')
+    expect(lego.quantity).toBe(3)
+  })
+
+  it('reports whether a shipment has been matched to its order', async () => {
+    await importAll()
+    // These shipping mails reference orders whose confirmations were never
+    // supplied, so nothing should claim to be linked.
+    expect(service.listShipments().every((s) => s.linkedToPurchase === false)).toBe(true)
+  })
+
+  it('still carries parcel contents, which exist only on the shipping mail', async () => {
+    await importAll()
+    const titles = service.listShipments().map((s) => s.title)
+    expect(titles.some((t) => t?.includes('Ascended Heroes'))).toBe(true)
+    expect(titles.some((t) => t?.includes('Destined Rivals'))).toBe(true)
+  })
+
+  it('surfaces the totals check from the purchase row', async () => {
+    await importAll()
+    expect(service.listPurchases().every((p) => p.totalsConsistent)).toBe(true)
   })
 })

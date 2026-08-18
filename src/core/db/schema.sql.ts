@@ -207,3 +207,16 @@ CREATE INDEX idx_shipments_status ON shipments(status);
 CREATE UNIQUE INDEX idx_shipments_tracking
   ON shipments(carrier, tracking_number) WHERE tracking_number IS NOT NULL;
 `
+
+/**
+ * Records whether a purchase's stated total matched its own parts.
+ *
+ * The check is made at parse time (quantity x unit + shipping == total) but was
+ * only ever kept in the event payload, so a screen reading the reconciled
+ * tables could not show it. It is a fact about the purchase, so it belongs on
+ * the purchase.
+ */
+export const SCHEMA_V3 = `
+ALTER TABLE purchases ADD COLUMN totals_consistent INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE purchases ADD COLUMN title TEXT;
+`
