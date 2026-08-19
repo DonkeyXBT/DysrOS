@@ -25,6 +25,7 @@ function sample(overrides: Partial<NewMessage> = {}): NewMessage {
     contentHash: hashContent('raw email body one'),
     fromAddress: 'orders@nike.com',
     fromName: 'Nike',
+    toAddress: 'shop@example.com',
     subject: 'Your order is confirmed',
     receivedAt: '2026-08-18T10:00:00Z',
     rawPath: 'mail/acc1/42.eml',

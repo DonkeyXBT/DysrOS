@@ -22,6 +22,7 @@ beforeEach(() => {
     folder: 'INBOX',
     messageId: '<o1@nike.com>',
     contentHash: hashContent('one'),
+    toAddress: 'shop@example.com',
     fromAddress: 'orders@nike.com',
     fromName: 'Nike',
     subject: 'Order confirmed',

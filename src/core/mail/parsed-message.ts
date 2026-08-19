@@ -13,6 +13,14 @@ export interface ParsedMessage {
   receivedAt: string
   text: string
   html: string
+  /**
+   * The address the mail was actually sent to.
+   *
+   * Not the mailbox it landed in: aliases and forwards mean one mailbox
+   * collects mail addressed to many, and which alias was used is often the
+   * useful fact — it is how one account's orders are told from another's.
+   */
+  toAddress: string | null
   /** Files carried by the mail — a shipping label, most usefully. Described
    *  rather than held: the bytes stay in the stored copy until asked for. */
   attachments: { filename: string | null; contentType: string; size: number }[]
@@ -30,6 +38,7 @@ export async function loadEml(raw: string | Buffer): Promise<ParsedMessage> {
     receivedAt: (mail.date ?? new Date(0)).toISOString(),
     text: mail.text ?? '',
     html: typeof mail.html === 'string' ? mail.html : '',
+    toAddress: recipientOf(mail),
     attachments: (mail.attachments ?? []).map((file) => ({
       filename: file.filename ?? null,
       contentType: file.contentType ?? 'application/octet-stream',
@@ -99,4 +108,30 @@ function htmlToText(html: string): string {
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(p|div|tr|li|h[1-6]|table)>/gi, '\n')
   return decodeEntities(withBreaks.replace(/<[^>]+>/g, ''))
+}
+
+/**
+ * Who the mail was addressed to.
+ *
+ * A forwarded mail keeps its original recipient in `Delivered-To` or
+ * `X-Original-To` while `To` may name the alias; either is closer to the truth
+ * than the mailbox that collected it. The first that names an address wins.
+ */
+function recipientOf(mail: {
+  to?: unknown
+  headers?: Map<string, unknown>
+}): string | null {
+  const headers = mail.headers
+  for (const name of ['delivered-to', 'x-original-to', 'x-forwarded-to']) {
+    const value = headers?.get(name)
+    const address = typeof value === 'string'
+      ? value
+      : Array.isArray(value) ? String(value[0] ?? '') : null
+    const found = address ? /[\w.+-]+@[\w.-]+\.\w+/.exec(address)?.[0] : null
+    if (found) return found.toLowerCase()
+  }
+
+  const to = mail.to as { value?: { address?: string }[] } | undefined
+  const first = to?.value?.find((entry) => entry.address)?.address
+  return first ? first.toLowerCase() : null
 }
