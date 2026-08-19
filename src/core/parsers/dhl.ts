@@ -52,7 +52,11 @@ function findExpectedDate(body: string, receivedAt: string): string | null {
 
 /** `van bol` — who sent the parcel, which is how it reads in the mail. */
 function findSender(body: string): string | null {
-  const match = /\bvan\s+([a-z0-9][a-z0-9 .&'-]{1,30}?)\b\s*(?:bij je|\.|,)/i.exec(body)
+  // The wording after the name varies by template — "van bol bij je op de
+  // stoep", "van bol is op woensdag bezorgd" — so the name ends at whichever
+  // of those continuations comes first.
+  const match = /\bvan\s+([a-z0-9][a-z0-9 .&'-]{1,30}?)\s*(?:bij je|is op|is bezorgd|\.|,)/i
+    .exec(body)
   const name = match?.[1]?.trim().toLowerCase()
   return name && name.length > 1 ? name : null
 }
@@ -142,4 +146,55 @@ export const dhlDeliveryAppointment: Parser = {
   },
 }
 
-export const DHL_PARSERS: readonly Parser[] = [dhlOutForDelivery, dhlDeliveryAppointment]
+/**
+ * "Je pakket is bezorgd" — the parcel is at the door, and DHL says so with the
+ * barcode in plain text.
+ *
+ * This is the mail that settles a parcel: without it the shipments list keeps
+ * saying "out for delivery" about something that arrived hours ago.
+ */
+export const dhlDelivered: Parser = {
+  id: 'dhl-delivered',
+  retailer: 'dhl',
+
+  matches(message) {
+    if (!isDhlMail(message)) return false
+    const body = bodyOf(message)
+    return /is bezorgd|pakket is bezorgd|afgeleverd/i.test(`${message.subject} ${body}`)
+  },
+
+  parse(message): ParsedEvent[] {
+    const body = bodyOf(message)
+    return [{
+      type: 'delivered',
+      retailer: 'dhl',
+      externalOrderId: null,
+      occurredAt: message.receivedAt,
+      payload: {
+        carrier: 'dhl',
+        direction: 'inbound',
+        trackingNumber: barcodeOf(message),
+        shipmentStatus: 'delivered',
+        deliveredAt: findDeliveredAt(body, message.receivedAt),
+        shippedBy: findSender(body),
+        trackingResolvable: false,
+      },
+    }]
+  },
+}
+
+/** "op woensdag 19 augustus om 15.30 bezorgd" — the day it actually arrived. */
+function findDeliveredAt(body: string, receivedAt: string): string {
+  const match = /op\s+(?:[a-zà-ü]+dag\s+)?(\d{1,2}\s+[a-zà-ü]+)/i.exec(body)
+  const day = match ? parseDutchDayMonth(match[1]!, receivedAt) : null
+  // The mail is sent as it happens, so its own date is the honest fallback.
+  return day ?? receivedAt.slice(0, 10)
+}
+
+export const DHL_PARSERS: readonly Parser[] = [
+  // Delivery first: "bezorgd" is a stronger claim than "onderweg", and a mail
+  // that says both is about a parcel that has arrived.
+  dhlDelivered,
+  dhlOutForDelivery,
+  dhlDeliveryAppointment,
+]

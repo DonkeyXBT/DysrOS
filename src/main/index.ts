@@ -82,6 +82,21 @@ async function sweepTracking(reason: string): Promise<void> {
     activity.finish('tracking', result.attempted === 0
       ? 'every parcel already has its code'
       : `found ${result.resolved} of ${result.attempted}`)
+
+    // Mail says a parcel arrived, but a mail can be missed. DHL answers for
+    // its own parcels, so they are asked directly on the same round.
+    activity.start('carrier', 'Checking with DHL', 'asking about parcels still out')
+    const status = await service.pollCarrierStatus({
+      onProgress: (done, total) => activity.step('carrier', `parcel ${done} of ${total}`, done, total),
+    })
+    activity.finish(
+      'carrier',
+      status.asked === 0
+        ? 'nothing still out with DHL'
+        : `${status.moved} moved on, ${status.delivered} delivered`,
+      status.failed < status.asked,
+    )
+    if (status.moved > 0) mainWindow?.webContents.send('mail-updated', { carrier: status })
   } catch (error) {
     log.record('warn', 'tracking', error)
     activity.finish('tracking', 'could not reach the carrier', false)

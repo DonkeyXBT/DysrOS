@@ -61,7 +61,7 @@ export class Reconciler {
       case 'cancelled':
         return this.applyCancellation(event, now)
       case 'delivered':
-        return this.applyDelivery(event)
+        return this.applyDelivery(event, now)
       default:
         // Nothing to do for this type yet, but it is not an error: mark it done
         // so it does not accumulate in the queue forever.
@@ -309,10 +309,61 @@ export class Reconciler {
     return true
   }
 
-  private applyDelivery(event: StoredEvent): boolean {
-    if (!event.externalOrderId) return true
-    const purchaseId = this.findPurchaseId(event.retailer, event.externalOrderId)
-    if (!purchaseId) return false
+  private applyDelivery(event: StoredEvent, now: string): boolean {
+    const payload = event.payload as Record<string, unknown>
+    const barcode = (payload.trackingNumber as string | null) ?? null
+
+    // The carrier's own delivery mail states the barcode and nothing else —
+    // no order reference — so the parcel is found by the barcode, and the
+    // order is whatever that parcel belongs to.
+    const parcelId = barcode
+      ? findParcel(this.db, (payload.carrier as string) ?? 'unknown', barcode, event.id)
+      : null
+
+    let purchaseId = event.externalOrderId
+      ? this.findPurchaseId(event.retailer, event.externalOrderId)
+      : null
+
+    if (parcelId) {
+      mergeInto(this.db, parcelId, {
+        status: 'delivered',
+        expectedDeliveryAt: (payload.deliveredAt as string | null) ?? null,
+      })
+      rememberMerge(this.db, event.id, parcelId)
+      this.db.prepare('UPDATE shipments SET last_movement_at = ? WHERE id = ?')
+        .run((payload.deliveredAt as string | null) ?? now, parcelId)
+
+      purchaseId = purchaseId ?? (this.db
+        .prepare('SELECT purchase_id FROM shipments WHERE id = ?')
+        .get(parcelId) as { purchase_id: string | null } | undefined)?.purchase_id ?? null
+    } else if (event.externalOrderId) {
+      // A retailer's delivery mail settles every parcel of that order: it is
+      // the retailer saying the goods arrived, whichever parcel carried them.
+      this.db.prepare(
+        `UPDATE shipments SET status = 'delivered', last_movement_at = ?
+         WHERE purchase_id = (SELECT id FROM purchases WHERE retailer = ? AND external_order_id = ?)
+           AND status != 'delivered'`,
+      ).run(now, event.retailer, event.externalOrderId)
+    } else if (barcode) {
+      // Nothing recorded this parcel yet — the delivery mail arrived first, or
+      // its shipping mail was never collected. It is still a parcel.
+      this.db.prepare(
+        `INSERT INTO shipments (id, direction, carrier, tracking_number, status,
+                                last_movement_at, created_at)
+         VALUES (?, 'inbound', ?, ?, 'delivered', ?, ?)
+         ON CONFLICT(id) DO UPDATE SET status = 'delivered'`,
+      ).run(
+        event.id,
+        (payload.carrier as string) ?? 'unknown',
+        barcode,
+        (payload.deliveredAt as string | null) ?? now,
+        now,
+      )
+    }
+
+    // Without an order there is nothing to move into stock, but the parcel is
+    // settled, which is the part that was visibly wrong.
+    if (!purchaseId) return true
 
     // Only items still in transit move into stock; a cancelled or returned item
     // must not be resurrected by a late delivery notice.

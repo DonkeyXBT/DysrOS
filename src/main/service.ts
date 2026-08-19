@@ -10,6 +10,7 @@ import { loadEml, textOf } from '../core/mail/parsed-message.js'
 import { ParserRegistry } from '../core/parsers/registry.js'
 import { BOL_PARSERS } from '../core/parsers/bol.js'
 import { DHL_PARSERS } from '../core/parsers/dhl.js'
+import { POSTNL_PARSERS } from '../core/parsers/postnl.js'
 import { MEDIAMARKT_PARSERS } from '../core/parsers/mediamarkt.js'
 import { PROSHOP_PARSERS } from '../core/parsers/proshop.js'
 import { POCKETGAMES_PARSERS } from '../core/parsers/pocketgames.js'
@@ -25,6 +26,9 @@ import {
 } from '../core/tracking/resolve-link.js'
 import { carrierTrackingUrl } from '../core/tracking/carrier-url.js'
 import { redirectParcel, type Page, type ServicePoint } from '../core/tracking/redirect.js'
+import {
+  fetchShipment, summarizeShipment, toShipmentStatus, type Fetcher,
+} from '../core/tracking/dhl-status.js'
 import { breakDownSale, vatWithinCost, NL_VAT_BASIS_POINTS } from '../core/sell.js'
 import { toNotification } from '../core/notify/from-events.js'
 import { findParcel, foldShipment, furthestStatus, mergeInto } from '../core/reconcile/shipment-merge.js'
@@ -106,6 +110,7 @@ export class AppService {
     // After the retailers: a retailer's own mail is the better source of what
     // was bought, and DHL's mail is the better source of when it arrives.
     ...DHL_PARSERS,
+    ...POSTNL_PARSERS,
     ...MEDIAMARKT_PARSERS,
     ...PROSHOP_PARSERS,
     ...POCKETGAMES_PARSERS,
@@ -300,7 +305,8 @@ export class AppService {
     // can be derived again from the events, so both are carried across the
     // rebuild rather than thrown away with the rows they sit on.
     const parcels = this.db.prepare(
-      `SELECT id, carrier, tracking_number, tracking_url, postal_code, status, last_polled_at
+      `SELECT id, direction, carrier, tracking_number, tracking_url, postal_code, status,
+              delivery_window, expected_delivery_at, last_polled_at, created_at
        FROM shipments WHERE tracking_number IS NOT NULL`,
     ).all() as Record<string, string | null>[]
     const redirects = this.db.prepare('SELECT * FROM redirects').all() as Record<string, unknown>[]
@@ -311,43 +317,41 @@ export class AppService {
       this.db.exec('DELETE FROM shipments')
       this.db.exec('DELETE FROM purchases')
       this.db.exec('UPDATE events SET reconciled_at = NULL')
+
+      // Put the known parcels back before anything is re-applied, rather than
+      // afterwards. A carrier's mail is recognised by its barcode, so the
+      // barcode has to be there when the mail is read again — otherwise the
+      // same parcel is recorded twice and the original loses the code that
+      // took a network round trip to find.
+      for (const parcel of parcels) {
+        this.db.prepare(
+          `INSERT INTO shipments
+             (id, direction, carrier, tracking_number, tracking_url, postal_code, status,
+              delivery_window, expected_delivery_at, last_polled_at, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        ).run(
+          parcel.id,
+          parcel.direction ?? 'inbound',
+          parcel.carrier ?? 'unknown',
+          parcel.tracking_number,
+          parcel.tracking_url,
+          parcel.postal_code,
+          parcel.status ?? 'in_transit',
+          parcel.delivery_window,
+          parcel.expected_delivery_at,
+          parcel.last_polled_at,
+          parcel.created_at ?? now,
+        )
+      }
     })
     rebuild()
     const result = this.reconciler.run(now)
-    this.restoreResolvedParcels(parcels, redirects)
+    this.restoreRedirects(redirects)
     return result
   }
 
-  /** Puts resolved barcodes and redirect records back on the rebuilt rows. */
-  private restoreResolvedParcels(
-    parcels: Record<string, string | null>[],
-    redirects: Record<string, unknown>[],
-  ): void {
-    for (const parcel of parcels) {
-      const id = parcel.id as string
-      const carrier = parcel.carrier ?? 'unknown'
-      const barcode = parcel.tracking_number!
-      // The rebuilt rows may already have folded this parcel into another one.
-      if (findParcel(this.db, carrier, barcode, id)) continue
-
-      this.db.prepare(
-        `UPDATE shipments
-         SET carrier = ?, tracking_number = ?,
-             tracking_url = COALESCE(?, tracking_url),
-             postal_code = COALESCE(?, postal_code),
-             status = ?, last_polled_at = COALESCE(?, last_polled_at)
-         WHERE id = ?`,
-      ).run(
-        carrier,
-        barcode,
-        parcel.tracking_url,
-        parcel.postal_code,
-        furthestStatus(parcel.status ?? null, 'in_transit'),
-        parcel.last_polled_at,
-        id,
-      )
-    }
-
+  /** Puts redirect records back on the rebuilt parcels. */
+  private restoreRedirects(redirects: Record<string, unknown>[]): void {
     for (const redirect of redirects) {
       const exists = this.db
         .prepare('SELECT 1 FROM shipments WHERE id = ?')
@@ -1885,6 +1889,78 @@ export class AppService {
       balance: formatMoney(money(collected - paid, 'EUR')),
       balanceMinor: collected - paid,
     }
+  }
+
+  /**
+   * Asks DHL where its parcels are.
+   *
+   * Mail is the first source and usually the fastest, but a mail can be
+   * missed and a parcel that quietly arrived should not sit in the list saying
+   * "out for delivery" for days. Only DHL offers a public answer, so only DHL
+   * parcels are asked; PostNL is settled by its own delivery mail.
+   *
+   * A parcel only ever moves forward, and a barcode DHL does not recognise
+   * changes nothing at all.
+   */
+  async pollCarrierStatus(
+    options: {
+      fetcher?: Fetcher
+      limit?: number
+      onProgress?: (done: number, total: number) => void
+    } = {},
+  ): Promise<{ asked: number; moved: number; delivered: number; failed: number }> {
+    const parcels = this.db.prepare(
+      `SELECT id, tracking_number, status, purchase_id FROM shipments
+       WHERE carrier = 'dhl' AND tracking_number IS NOT NULL AND status != 'delivered'
+       ORDER BY COALESCE(last_polled_at, '') ASC
+       LIMIT ?`,
+    ).all(options.limit ?? 25) as {
+      id: string; tracking_number: string; status: string; purchase_id: string | null
+    }[]
+
+    let moved = 0
+    let delivered = 0
+    let failed = 0
+    const now = new Date().toISOString()
+
+    for (const [index, parcel] of parcels.entries()) {
+      try {
+        const summary = summarizeShipment(await fetchShipment(parcel.tracking_number, options.fetcher))
+        const status = toShipmentStatus(summary.state)
+        this.db.prepare('UPDATE shipments SET last_polled_at = ? WHERE id = ?').run(now, parcel.id)
+
+        if (status && status !== parcel.status) {
+          const next = furthestStatus(parcel.status, status)
+          if (next !== parcel.status) {
+            this.db.prepare(
+              'UPDATE shipments SET status = ?, last_movement_at = ? WHERE id = ?',
+            ).run(next, summary.lastEventAt ?? now, parcel.id)
+            moved += 1
+            if (next === 'delivered') {
+              delivered += 1
+              this.settleDelivered(parcel.purchase_id)
+            }
+          }
+        }
+      } catch {
+        // A carrier that cannot be reached is a carrier to ask again later.
+        failed += 1
+      }
+      options.onProgress?.(index + 1, parcels.length)
+    }
+
+    return { asked: parcels.length, moved, delivered, failed }
+  }
+
+  /** What a delivery means for the goods: they are in stock now. */
+  private settleDelivered(purchaseId: string | null): void {
+    if (!purchaseId) return
+    this.db.prepare(
+      "UPDATE items SET status = 'in_stock' WHERE purchase_id = ? AND status = 'incoming'",
+    ).run(purchaseId)
+    this.db.prepare(
+      "UPDATE purchases SET status = 'delivered' WHERE id = ? AND status != 'cancelled'",
+    ).run(purchaseId)
   }
 
   /** Rows for the DHL ServicePoint redirect tool's `trackings.csv`. */
