@@ -66,8 +66,16 @@ export class Reconciler {
     }
   }
 
+  /** True when this order was deleted by hand and must stay deleted. */
+  private isSuppressed(kind: string, key: string): boolean {
+    return this.db
+      .prepare('SELECT 1 FROM suppressions WHERE kind = ? AND key = ?')
+      .get(kind, key) !== undefined
+  }
+
   private applyOrder(event: StoredEvent, now: string): boolean {
     if (!event.externalOrderId) return true
+    if (this.isSuppressed('purchase', `${event.retailer}|${event.externalOrderId}`)) return true
 
     const payload = event.payload as Record<string, unknown>
     const purchaseId = purchaseKey(event.retailer, event.externalOrderId)
@@ -142,6 +150,7 @@ export class Reconciler {
   }
 
   private applyShipment(event: StoredEvent, now: string): boolean {
+    if (this.isSuppressed('shipment', event.id)) return true
     const payload = event.payload as Record<string, unknown>
     const purchaseId = event.externalOrderId
       ? this.findPurchaseId(event.retailer, event.externalOrderId)

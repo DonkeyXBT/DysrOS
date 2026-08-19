@@ -220,3 +220,20 @@ export const SCHEMA_V3 = `
 ALTER TABLE purchases ADD COLUMN totals_consistent INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE purchases ADD COLUMN title TEXT;
 `
+
+/**
+ * Records deliberately removed by hand.
+ *
+ * Deletion cannot live on the event, because re-reading mail rebuilds events
+ * from scratch and would bring the record straight back — which makes deleting
+ * feel broken rather than final. Keyed by the thing itself, so it survives any
+ * number of rebuilds.
+ */
+export const SCHEMA_V4 = `
+CREATE TABLE suppressions (
+  kind       TEXT NOT NULL,
+  key        TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  PRIMARY KEY (kind, key)
+);
+`

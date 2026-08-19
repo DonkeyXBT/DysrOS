@@ -63,6 +63,7 @@ const api = {
   },
   deleteAllData: (includeAccounts: boolean) =>
     ipcRenderer.invoke('delete-all-data', includeAccounts),
+  deleteRecord: (kind: string, id: string) => ipcRenderer.invoke('delete-record', kind, id),
   discordSettings: () => ipcRenderer.invoke('discord-settings'),
   discordSetWebhook: (url: string) => ipcRenderer.invoke('discord-set-webhook', url),
   discordSetRule: (event: string, enabled: boolean) =>

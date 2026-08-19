@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api, type PurchaseView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
 import { SkeletonTable } from '../Skeleton.js'
+import { ContextMenu, useContextMenu } from '../ContextMenu.js'
+import { Confirm } from '../Confirm.js'
 
 const COLUMNS = '62px 96px 118px 88px minmax(150px,1fr) 40px 82px 82px 88px 110px 128px'
 
@@ -28,10 +30,14 @@ const STATUS_LABEL: Record<string, string> = {
 export function Purchases({ query, dataVersion }: { query: string; dataVersion: number }) {
   const [rows, setRows] = useState<PurchaseView[] | null>(null)
   const [kindFilter, setKindFilter] = useState<'all' | 'buy' | 'cancel'>('all')
+  const [confirming, setConfirming] = useState<PurchaseView | null>(null)
+  const { menu, open, close } = useContextMenu()
 
-  useEffect(() => {
+  const load = () => {
     void api.purchases().then(setRows)
-  }, [dataVersion])
+  }
+
+  useEffect(load, [dataVersion])
 
   const all = rows ?? []
   const term = query.trim().toLowerCase()
@@ -67,7 +73,30 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+    <div className="screen">
+      <ContextMenu menu={menu} onClose={close} />
+
+      {confirming && (
+        <Confirm
+          title={confirming.kind === 'cancel' ? 'Delete cancellation' : 'Delete order'}
+          destructive
+          confirmLabel="Delete"
+          onCancel={() => setConfirming(null)}
+          onConfirm={async () => {
+            const target = confirming
+            setConfirming(null)
+            await api.deleteRecord('purchase', target.id)
+            load()
+          }}
+          body={
+            <>
+              Remove <strong>{confirming.reference ?? confirming.retailer}</strong>? Its units and
+              any expected refund go with it, and re-reading mail will not bring it back.
+            </>
+          }
+        />
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
         {(['all', 'buy', 'cancel'] as const).map((kind) => (
           <button
@@ -98,6 +127,7 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
             <div>Parcel</div>
           </div>
 
+          <div className="table-scroll-y">
           {paged.visible.map((row) => {
             const isCancel = row.kind === 'cancel'
             const statusColor = STATUS_COLOR[row.status] ?? '#8d94a6'
@@ -105,7 +135,20 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
               <div
                 key={row.id}
                 className="trow"
-                style={{ minWidth: 1050, gridTemplateColumns: COLUMNS }}
+                style={{ minWidth: 1050, gridTemplateColumns: COLUMNS, cursor: 'default' }}
+                onContextMenu={(event) =>
+                  open(event, row.reference ?? row.retailer, [
+                    {
+                      label: 'Copy order reference',
+                      disabled: !row.reference,
+                      onSelect: () => void navigator.clipboard.writeText(row.reference ?? ''),
+                    },
+                    {
+                      label: isCancel ? 'Delete cancellation' : 'Delete order and its units',
+                      destructive: true,
+                      onSelect: () => setConfirming(row),
+                    },
+                  ])}
               >
                 <div>
                   <span
@@ -172,6 +215,7 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
               </div>
             )
           })}
+          </div>
         </div>
       </div>
 

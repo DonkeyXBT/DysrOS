@@ -666,3 +666,54 @@ describe.skipIf(!allPresent)('dashboard pipeline and capital', () => {
     expect(service.dashboard().months).toHaveLength(6)
   })
 })
+
+describe.skipIf(!allPresent)('deleting records by hand', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('removes a single unit and leaves its order alone', async () => {
+    await importAll()
+    const before = service.listInventory()
+    service.deleteRecord('item', before[0]!.id)
+
+    expect(service.listInventory()).toHaveLength(before.length - 1)
+    expect(service.listPurchases().filter((p) => p.kind === 'buy')).toHaveLength(2)
+  })
+
+  it('takes an order\'s units and refunds with it', async () => {
+    await importAll()
+    const order = service.listPurchases().find((p) => p.reference === 'C000CXJLHK')!
+    service.deleteRecord('purchase', order.id)
+
+    expect(service.listPurchases().some((p) => p.reference === 'C000CXJLHK')).toBe(false)
+    // The three LEGO units belonged to that order and must not be left orphaned.
+    expect(service.listInventory().some((i) => i.orderRef === 'C000CXJLHK')).toBe(false)
+  })
+
+  it('does not resurrect a deleted order when mail is re-read', async () => {
+    await importAll()
+    const order = service.listPurchases().find((p) => p.reference === 'C000CXJLHK')!
+    service.deleteRecord('purchase', order.id)
+
+    await service.reparseAll()
+
+    // Deliberate removal has to survive a rebuild, or deleting feels broken.
+    expect(service.listPurchases().some((p) => p.reference === 'C000CXJLHK')).toBe(false)
+  })
+
+  it('keeps the order when a shipment is deleted', async () => {
+    await importAll()
+    const shipment = service.listShipments()[0]!
+    service.deleteRecord('shipment', shipment.id)
+
+    expect(service.listShipments()).toHaveLength(1)
+    expect(service.listPurchases().filter((p) => p.kind === 'buy')).toHaveLength(2)
+  })
+
+  it('is harmless when the record is already gone', async () => {
+    await importAll()
+    expect(service.deleteRecord('item', 'not-a-real-id')).toEqual({ deleted: true })
+    expect(service.listInventory()).toHaveLength(4)
+  })
+})
