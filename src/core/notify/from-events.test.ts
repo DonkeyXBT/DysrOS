@@ -80,3 +80,63 @@ describe('turning events into notifications', () => {
     }
   })
 })
+
+describe('a carrier says only "delivered"; the parcel says what arrived', () => {
+  const carrierMail: NotifiableRow = {
+    id: 'event-2',
+    type: 'delivered',
+    retailer: 'postnl',
+    externalOrderId: null,
+    occurredAt: '2026-08-19T15:40:43.000Z',
+    // PostNL knows a barcode and nothing else about the goods.
+    payload: { carrier: 'postnl', trackingNumber: '3STUNM283074965', shipmentStatus: 'delivered' },
+    parcel: {
+      carrier: 'postnl',
+      trackingNumber: '3STUNM283074965',
+      trackingUrl: 'https://jouw.postnl.nl/track-and-trace/3STUNM283074965',
+      status: 'delivered',
+      expectedDeliveryAt: null,
+      deliveryWindow: null,
+      contents: 'LEGO Botanicals Bospaddenstoelen - 11505',
+      units: 3,
+      retailer: 'bol',
+    },
+  }
+
+  it('names the goods the tracking belongs to', () => {
+    const notification = toNotification(carrierMail)!
+    expect(notification.title).toBe('LEGO Botanicals Bospaddenstoelen - 11505')
+    expect(notification.quantity).toBe(3)
+  })
+
+  it('credits the shop, not the courier, and keeps the courier as the carrier', () => {
+    const notification = toNotification(carrierMail)!
+    expect(notification.retailer).toBe('bol')
+    expect(notification.carrier).toBe('postnl')
+  })
+
+  it('takes the shop from the mail itself when no order is linked', () => {
+    const notification = toNotification({
+      ...carrierMail,
+      payload: { ...carrierMail.payload, shippedBy: 'bol' },
+      parcel: { ...carrierMail.parcel!, retailer: null },
+    })!
+    expect(notification.retailer).toBe('bol')
+  })
+
+  it('says what it knows when the parcel is not linked to an order at all', () => {
+    const notification = toNotification({ ...carrierMail, parcel: null })!
+    expect(notification.title).toBeNull()
+    expect(notification.retailer).toBe('postnl')
+    expect(notification.trackingNumber).toBe('3STUNM283074965')
+  })
+
+  it('prefers what the retailer mail said over the parcel', () => {
+    const notification = toNotification({
+      ...carrierMail,
+      payload: { ...carrierMail.payload, title: 'One Piece - Double Pack Set', quantity: 1 },
+    })!
+    expect(notification.title).toBe('One Piece - Double Pack Set')
+    expect(notification.quantity).toBe(1)
+  })
+})

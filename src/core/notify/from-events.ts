@@ -40,6 +40,11 @@ export interface NotifiableRow {
     status: string | null
     expectedDeliveryAt: string | null
     deliveryWindow: string | null
+    /** What is in the parcel, from the order it belongs to. */
+    contents?: string | null
+    units?: number | null
+    /** Who sold it, as opposed to who carried it. */
+    retailer?: string | null
   } | null
 }
 
@@ -58,12 +63,18 @@ export function toNotification(row: NotifiableRow): NotificationInput | null {
   const amountMinor = numberOr(payload.totalMinor, null)
   const currency = typeof payload.currency === 'string' ? payload.currency : 'EUR'
 
+  // A carrier's mail names no goods — it knows a barcode, not a product. The
+  // parcel does know, through the order it belongs to, and "delivered" is a
+  // poor notice if it cannot say what arrived.
+  const title = (payload.title as string | null) ?? row.parcel?.contents ?? null
+  const seller = (payload.shippedBy as string | null) ?? row.parcel?.retailer ?? row.retailer
+
   return {
     event,
-    retailer: row.retailer,
+    retailer: seller,
     reference: row.externalOrderId,
-    title: (payload.title as string | null) ?? null,
-    quantity: numberOr(payload.quantity, 1) ?? 1,
+    title,
+    quantity: numberOr(payload.quantity, null) ?? row.parcel?.units ?? 1,
     amount: amountMinor === null ? null : money(amountMinor, currency as 'EUR'),
     // The barcode is resolved after the mail is read, so the parcel is the
     // better source; the mail's own link stands in until then.

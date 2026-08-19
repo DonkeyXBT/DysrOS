@@ -1366,6 +1366,57 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     expect((await service.flushNotifications({ send: retry.send })).sent).toBeGreaterThan(0)
   })
 
+  it('announces one arrival once, however many mails report it', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0637312004384176',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0637312004384176',
+      }),
+    })
+    // The carrier's own delivery mail and, later, the retailer's: one parcel,
+    // one arrival, one notice.
+    await service.importEml(fixturePath('Je_pakket_is_bezorgd_dhl.eml'))
+
+    const { batches, send } = recorder()
+    await service.flushNotifications({ send })
+
+    const delivered = batches
+      .flatMap((batch) => batch.inputs)
+      .filter((input) => input.event === 'delivered')
+    expect(delivered).toHaveLength(1)
+  })
+
+  it('names what was delivered, which the carrier mail never says', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0637312004384176',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0637312004384176',
+      }),
+    })
+    await service.flushNotifications({ send: recorder().send })
+
+    await service.importEml(fixturePath('Je_pakket_is_bezorgd_dhl.eml'))
+    const { batches, send } = recorder()
+    await service.flushNotifications({ send })
+
+    const delivered = batches
+      .flatMap((batch) => batch.inputs)
+      .find((input) => input.event === 'delivered')
+    expect(delivered).toBeDefined()
+    // The barcode came from the carrier; the goods came from the order it
+    // belongs to.
+    expect(delivered!.trackingNumber).toBe('JVGL0637312004384176')
+    expect(delivered!.title ?? '').not.toBe('')
+    expect(delivered!.retailer).toBe('bol')
+  })
+
   it('sends in tens, which is all Discord accepts in one message', async () => {
     service.setDiscordWebhook(WEBHOOK)
     await importAll()
