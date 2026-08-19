@@ -39,7 +39,7 @@ export function SellDialog({
       : Math.round((perUnit ? amountMinor * units.length : amountMinor) * 1.21)
     const vat = Math.round((gross * 2100) / 12100)
     const costVat = Math.round((costMinor * 2100) / 12100)
-    return { gross, vat, net: gross - vat, profit: (gross - vat) - (costMinor - costVat) }
+    return { gross, vat, net: gross - vat, costVat, profit: gross - costMinor }
   }, [amountMinor, includesVat, perUnit, units.length, costMinor])
 
   const save = async () => {
@@ -174,9 +174,10 @@ export function SellDialog({
           {preview && (
             <div className="modal-panel" style={{ gap: 5 }}>
               <Line label="Received" value={preview.gross} strong />
-              <Line label="BTW inside it (21%)" value={preview.vat} muted />
               <Line label="Cost of the units" value={-costMinor} muted />
-              <Line label="Profit after BTW both ways" value={preview.profit} strong accent />
+              <Line label="Profit" value={preview.profit} strong accent />
+              <Line label="BTW collected (21%)" value={preview.vat} muted />
+              <Line label="BTW already paid on the stock" value={preview.costVat} muted />
               {units.length > 1 && !perUnit && (
                 <span style={{ fontSize: 10.5, color: 'var(--text-ghost)', lineHeight: 1.45 }}>
                   Split across the units in proportion to what each cost, so each row shows a

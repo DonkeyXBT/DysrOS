@@ -5,7 +5,10 @@ import { SkeletonTable } from '../Skeleton.js'
 import { ContextMenu, useContextMenu } from '../ContextMenu.js'
 import { Confirm } from '../Confirm.js'
 
-const COLUMNS = '62px 96px 118px 88px minmax(150px,1fr) 40px 82px 82px 88px 110px 128px'
+// Sized to fit the page rather than to be scrolled sideways: the last column
+// is the one that gets cut, and "no matching order" is the one you most need
+// to read.
+const COLUMNS = '58px 70px 108px 78px minmax(150px,1fr) 36px 76px 78px 84px 104px 112px'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'oklch(0.68 0.02 265)',
@@ -53,7 +56,7 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
   // returns below rather than after them.
   const paged = usePaged(filtered, `${kindFilter}|${term}`)
 
-  if (!rows) return <SkeletonTable columns={COLUMNS} minWidth={1050} rows={10} />
+  if (!rows) return <SkeletonTable columns={COLUMNS} minWidth={995} rows={10} />
 
   if (rows.length === 0) {
     return (
@@ -117,7 +120,7 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
 
       <div className="table">
         <div className="table-scroll">
-          <div className="thead" style={{ minWidth: 1050, gridTemplateColumns: COLUMNS }}>
+          <div className="thead" style={{ minWidth: 995, gridTemplateColumns: COLUMNS }}>
             <div>Type</div><div>Retailer</div><div>Order ref</div><div>Date</div><div>Item</div>
             <div style={{ textAlign: 'right' }}>Qty</div>
             <div style={{ textAlign: 'right' }}>Unit</div>
@@ -135,7 +138,7 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
               <div
                 key={row.id}
                 className="trow"
-                style={{ minWidth: 1050, gridTemplateColumns: COLUMNS, cursor: 'default' }}
+                style={{ minWidth: 995, gridTemplateColumns: COLUMNS, cursor: 'default' }}
                 onContextMenu={(event) =>
                   open(event, row.reference ?? row.retailer, [
                     {

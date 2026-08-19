@@ -310,6 +310,13 @@ export class AppService {
        FROM shipments WHERE tracking_number IS NOT NULL`,
     ).all() as Record<string, string | null>[]
     const redirects = this.db.prepare('SELECT * FROM redirects').all() as Record<string, unknown>[]
+    // A sale made by hand is not derived from mail and cannot be derived again.
+    // Deleting the items unhooks every sale from what it sold, so the links are
+    // taken first and put back afterwards — the item ids are deterministic, so
+    // they come back exactly as they were.
+    const sales = this.db.prepare(
+      'SELECT id, item_id FROM sales WHERE item_id IS NOT NULL',
+    ).all() as { id: string; item_id: string }[]
 
     const rebuild = this.db.transaction(() => {
       this.db.exec('DELETE FROM refunds')
@@ -347,7 +354,23 @@ export class AppService {
     rebuild()
     const result = this.reconciler.run(now)
     this.restoreRedirects(redirects)
+    this.restoreSales(sales)
     return result
+  }
+
+  /**
+   * Puts hand-made sales back on the rebuilt items.
+   *
+   * A sold unit is sold whatever the mail says: the mail describes buying it,
+   * never selling it, so the rebuild has nothing to re-derive from.
+   */
+  private restoreSales(sales: { id: string; item_id: string }[]): void {
+    for (const sale of sales) {
+      const exists = this.db.prepare('SELECT 1 FROM items WHERE id = ?').get(sale.item_id)
+      if (!exists) continue
+      this.db.prepare('UPDATE sales SET item_id = ? WHERE id = ?').run(sale.item_id, sale.id)
+      this.db.prepare("UPDATE items SET status = 'sold' WHERE id = ?").run(sale.item_id)
+    }
   }
 
   /** Puts redirect records back on the rebuilt parcels. */
@@ -614,10 +637,9 @@ export class AppService {
       const costVatMinor = vatWithinCost(costMinor)
       const soldGross = (row.sold_gross as number | null) ?? null
       const soldVat = (row.sold_vat as number | null) ?? null
-      // Profit is net against net: VAT collected belongs to the tax office.
-      const profitMinor = soldGross === null
-        ? null
-        : (soldGross - (soldVat ?? 0)) - (costMinor - costVatMinor)
+      // What it fetched less what it cost. The VAT on both sides is carried
+      // separately, for the return, rather than being netted out here.
+      const profitMinor = soldGross === null ? null : soldGross - costMinor
 
       return {
         id: row.id as string,

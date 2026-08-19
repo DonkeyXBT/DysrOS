@@ -1048,8 +1048,8 @@ describe.skipIf(!allPresent)('selling by hand, to a buyer who is not a marketpla
     expect(after.status).toBe('sold')
     expect(after.soldMinor).toBe(7500)
     expect(after.buyer).toBe('Jan')
-    // Profit is net revenue less net cost, never gross less gross.
-    expect(after.profitMinor).toBe(7500 - 1302 - (unit!.costMinor - after.costVatMinor))
+    // Profit is what it fetched less what it cost.
+    expect(after.profitMinor).toBe(7500 - unit!.costMinor)
   })
 
   it('adds VAT on when the price was agreed without it', async () => {
@@ -1560,5 +1560,50 @@ describe.skipIf(!allPresent)('asking DHL about parcels still out', () => {
 
     const result = await service.pollCarrierStatus({ fetcher: failing })
     expect(result).toMatchObject({ asked: 1, moved: 0, failed: 1 })
+  })
+})
+
+describe.skipIf(!allPresent)('a sale sticks', () => {
+  async function soldOne() {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    const unit = service.listInventory()[0]!
+    service.sellItems([unit.id], { amountMinor: 7500, includesVat: true, buyer: 'Mark' })
+    return unit
+  }
+
+  it('survives re-reading the mail, which cannot know anything about selling', async () => {
+    const unit = await soldOne()
+
+    // What an upgrade does. The sale used to come unhooked from its unit here:
+    // the unit went back to "incoming" and the money was counted as profit
+    // with nothing to set against it.
+    await service.reparseAll()
+
+    const after = service.listInventory().find((item) => item.id === unit.id)!
+    expect(after.status).toBe('sold')
+    expect(after.soldMinor).toBe(7500)
+    expect(after.buyer).toBe('Mark')
+    expect(after.profitMinor).toBe(7500 - unit.costMinor)
+  })
+
+  it('keeps the dashboard honest across a rebuild', async () => {
+    const unit = await soldOne()
+    const before = service.dashboard().profit.netMinor
+    expect(before).toBe(7500 - unit.costMinor)
+
+    service.rebuildEntities()
+
+    // Not the whole 7500 with no cost against it.
+    expect(service.dashboard().profit.netMinor).toBe(before)
+  })
+
+  it('states profit as what was received less what was paid', async () => {
+    const unit = await soldOne()
+    const after = service.listInventory().find((item) => item.id === unit.id)!
+
+    expect(after.profitMinor).toBe(after.soldMinor! - after.costMinor)
+    // The VAT on both sides is still recorded, for the return.
+    expect(after.soldVatMinor).toBe(1302)
+    expect(after.costVatMinor).toBeGreaterThan(0)
   })
 })
