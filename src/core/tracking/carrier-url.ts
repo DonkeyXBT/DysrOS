@@ -50,3 +50,19 @@ export function carrierTrackingUrl(
       return null
   }
 }
+
+/**
+ * The page where a DHL parcel can be sent to a ServicePoint instead.
+ *
+ * Same address the standalone redirect tool drives, so both agree on what a
+ * parcel is. Requires the postcode: without it DHL will not show the options.
+ */
+export function dhlInterventionUrl(
+  trackingNumber: string | null,
+  postalCode: string | null,
+): string | null {
+  const base = carrierTrackingUrl('dhl', trackingNumber, postalCode)
+  const postcode = normalisePostcode(postalCode)
+  if (!base || !postcode) return null
+  return `${base}/interventions`
+}
