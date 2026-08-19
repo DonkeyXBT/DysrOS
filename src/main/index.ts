@@ -706,6 +706,12 @@ app.whenReady().then(() => {
     return count
   })
   ipcMain.handle('vat-position', () => service.vatPosition())
+  ipcMain.handle('sync-lookback', () => service.syncLookbackDays())
+  handle('set-sync-lookback', (days: number) => {
+    const applied = service.setSyncLookbackDays(days)
+    log.record('info', 'sync', `lookback set to ${applied} day(s)`)
+    return applied
+  })
   ipcMain.handle('sales', () => service.listSales())
   ipcMain.handle('sales-series', (_event, days: number | null) => service.salesSeries(days))
   handle('save-label', async (shipmentId: string) => {

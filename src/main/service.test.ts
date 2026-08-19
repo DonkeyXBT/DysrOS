@@ -1887,3 +1887,45 @@ describe.skipIf(!allPresent)('an order knows which mailbox it came in on', () =>
     expect(cancel.mailSubject).toBeTruthy()
   })
 })
+
+describe('how far back mail is collected', () => {
+  it('reaches back a week unless told otherwise', () => {
+    expect(service.syncLookbackDays()).toBe(7)
+  })
+
+  it('takes a span someone chose', () => {
+    expect(service.setSyncLookbackDays(90)).toBe(90)
+    expect(service.syncLookbackDays()).toBe(90)
+  })
+
+  it('refuses a span that means nothing', () => {
+    expect(service.setSyncLookbackDays(0)).toBe(1)
+    expect(service.setSyncLookbackDays(-30)).toBe(1)
+    expect(service.setSyncLookbackDays(99_999)).toBe(3650)
+    expect(service.setSyncLookbackDays(30.7)).toBe(30)
+  })
+
+  it('asks the mailboxes again when the span grows', () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'resell-ops-')), 'lookback.db')
+    const cipher = { encrypt: (p: string) => p, decrypt: (c: string) => c }
+    const app = new AppService(path, cipher)
+
+    const raw = new Database(path)
+    const cursor = () => (raw.prepare('SELECT COUNT(*) AS n FROM folder_cursors').get() as { n: number }).n
+    const remember = () => raw.prepare(
+      `INSERT INTO folder_cursors (account_id, folder, uid_validity, last_uid)
+       VALUES ('local-import', 'INBOX', 1, 500)`,
+    ).run()
+
+    remember()
+    app.setSyncLookbackDays(30)
+    // Reaching further back means nothing if the sync starts where it stopped.
+    expect(cursor()).toBe(0)
+
+    remember()
+    app.setSyncLookbackDays(7)
+    // Nothing already collected is thrown away for being old.
+    expect(cursor()).toBe(1)
+    raw.close()
+  })
+})

@@ -60,6 +60,10 @@ const AYCD_KEY_SETTING = 'aycd_api_key_cipher'
  */
 const NOTIFY_MAX_AGE_MS = 24 * 60 * 60 * 1000
 
+/** How far back a first sync reaches, unless someone says otherwise. */
+const DEFAULT_LOOKBACK_DAYS = 7
+const SYNC_LOOKBACK_SETTING = 'sync_lookback_days'
+
 /** Where DHL sends the confirmation when a parcel is redirected. */
 const REDIRECT_EMAIL_SETTING = 'redirect_email'
 const AYCD_ADDRESSES_SETTING = 'aycd_addresses'
@@ -897,7 +901,7 @@ export class AppService {
             })
             return isNew
           },
-          { limit: 500 },
+          { limit: 500, initialLookbackDays: this.syncLookbackDays() },
         )
         fetched += result.fetched
         stored += result.stored
@@ -2445,6 +2449,38 @@ export class AppService {
     return [...orders, ...sales, ...parcels]
       .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
       .slice(0, limit)
+  }
+
+  /**
+   * How far back a first sync of a mailbox reaches.
+   *
+   * A week by default: a busy mailbox holds thousands of messages a month,
+   * almost none of them relevant, and a first run that grinds through a year
+   * of them reads as broken. Someone who has just connected a mailbox and
+   * wants their whole history can say so.
+   */
+  syncLookbackDays(): number {
+    const stored = Number(this.getSetting(SYNC_LOOKBACK_SETTING))
+    return Number.isFinite(stored) && stored > 0 ? Math.floor(stored) : DEFAULT_LOOKBACK_DAYS
+  }
+
+  /**
+   * Changes how far back mail is collected from.
+   *
+   * Reaching further back only means something if the mailboxes are asked
+   * again, so widening the window forgets where each folder had got to: the
+   * next sync starts from the new date instead of from the last message it
+   * read. Nothing is duplicated by that — mail is recognised by its content —
+   * and narrowing the window changes nothing already collected, because mail
+   * already read is not thrown away for being old.
+   */
+  setSyncLookbackDays(days: number): number {
+    const wanted = Math.max(1, Math.min(3650, Math.floor(days)))
+    const previous = this.syncLookbackDays()
+    this.setSetting(SYNC_LOOKBACK_SETTING, String(wanted))
+
+    if (wanted > previous) this.db.prepare('DELETE FROM folder_cursors').run()
+    return wanted
   }
 
   /** Rows for the DHL ServicePoint redirect tool's `trackings.csv`. */

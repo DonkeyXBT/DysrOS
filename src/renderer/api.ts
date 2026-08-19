@@ -300,6 +300,8 @@ interface Api {
     buyer?: string | null; note?: string | null; soldAt?: string
   }): Promise<SaleView | null>
   deleteSale(id: string): Promise<boolean>
+  syncLookback(): Promise<number>
+  setSyncLookback(days: number): Promise<number>
   vatPosition(): Promise<{
     rateBasisPoints: number; paidOnPurchases: string; collectedOnSales: string
     balance: string; balanceMinor: number

@@ -73,9 +73,9 @@ export function AycdPanel() {
       </div>
 
       <div style={{ fontSize: 11.5, color: 'var(--text-dimmer)', lineHeight: 1.55 }}>
-        Inbox watches for mail arriving from now on — it cannot read anything already in a
-        mailbox, so it complements the IMAP connection rather than replacing it. The Inbox desktop
-        application must be running, and the key comes from its Settings → Tasks (API) screen.
+        Watches mail arriving from now on: it cannot read what is already in a mailbox, so it
+        complements the IMAP connection rather than replacing it. The Inbox application must be
+        running; the key is in its Settings → Tasks (API) screen.
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
