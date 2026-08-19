@@ -14,32 +14,24 @@ import type { AppNotification } from './Notifications.js'
 import { Updater } from './Updater.js'
 
 /** Nav order and per-item hue, both taken from the mockup. */
+/**
+ * Navigation, with the icon paths from the design. Review is reached from
+ * Settings rather than the sidebar, and its count rides on the Settings badge.
+ */
 const NAV = [
-  { label: 'Dashboard', hue: 178 },
-  { label: 'Inventory', hue: 225 },
-  { label: 'Purchases', hue: 285 },
-  { label: 'Sales', hue: 148 },
-  { label: 'Shipments', hue: 40 },
-  { label: 'Reports', hue: 260 },
-  { label: 'Settings', hue: 220 },
+  { label: 'Dashboard', icon: 'M2.5 2.5h4v4h-4zM9.5 2.5h4v4h-4zM2.5 9.5h4v4h-4zM9.5 9.5h4v4h-4z' },
+  { label: 'Inventory', icon: 'M2.5 5.5 8 2.5l5.5 3v5L8 13.5 2.5 10.5zM2.5 5.5 8 8.5l5.5-3M8 8.5v5' },
+  { label: 'Purchases', icon: 'M3.5 5.5h9l-1 8h-7zM6 5.5V4.2a2 2 0 0 1 4 0v1.3' },
+  { label: 'Sales', icon: 'M8.5 2.5H13V7L7 13 2.5 8.5zM10.5 5h.01' },
+  { label: 'Shipments', icon: 'M2 5h6.5v5H2zM8.5 6.5h2.6L13 8.4V10H8.5M4 12h.01M11 12h.01' },
+  { label: 'Reports', icon: 'M3.5 12.5V8M8 12.5V4M12.5 12.5V7' },
+  { label: 'Settings', icon: 'M3 5.5h10M3 10.5h10M6.2 3.6v3.8M10 8.6v3.8' },
 ] as const
 
 /** Reachable from Settings rather than the sidebar: it is somewhere you go
  *  when something has gone wrong, not part of the daily rotation. */
 type Extra = 'Logs' | 'Review'
 
-const SUBTITLES: Record<string, string> = {
-  Dashboard: 'What you have, what it cost, what is moving',
-  Inventory: 'Units held or in flight',
-  Purchases: 'Retailer orders and refunds',
-  Sales: 'Payouts and profit by channel',
-  Shipments: 'Track and trace, both directions',
-  Review: 'Emails no parser recognised',
-  Reports: 'P&L, VAT and currency exposure',
-  Settings: 'Mailboxes and integrations',
-  Logs: 'Errors, warnings and crash reports',
-
-}
 
 export type Screen = (typeof NAV)[number]['label'] | Extra
 
@@ -61,6 +53,9 @@ export function App() {
   const [notifications, setNotifications] = useState<AppNotification[]>([])
   const [unread, setUnread] = useState(0)
   const [bellOpen, setBellOpen] = useState(false)
+  const [update, setUpdate] = useState<{ available: boolean; version: string | null }>({
+    available: false, version: null,
+  })
 
   const notify = useCallback((level: AppNotification['level'], text: string) => {
     setNotifications((current) => [
@@ -76,6 +71,10 @@ export function App() {
 
   useEffect(() => {
     void refresh()
+    // The update pill only appears when there is genuinely something to install.
+    void api.checkForUpdate().then((status) => {
+      setUpdate({ available: status.available, version: status.version ?? null })
+    })
     // The main process ingests on launch and whenever new mail lands, so the UI
     // follows along rather than asking anyone to import anything.
     const offMail = api.onMailUpdated(() => {
@@ -149,6 +148,25 @@ export function App() {
     <div className="app">
       <TitleBar
         screen={screen}
+        sync={{
+          title: syncing ? 'Syncing' : summary?.messageCount ? 'Synced' : 'Never synced',
+          detail: syncing
+            ? progress
+              ? `${progress.done} read · ${progress.stored} new`
+              : 'connecting'
+            : summary?.messageCount
+              ? `${summary.messageCount} messages · ${summary.eventCount} events`
+              : 'connect an account to start',
+          colour: syncing
+            ? 'oklch(0.76 0.12 232)'
+            : summary?.messageCount ? 'oklch(0.78 0.12 148)' : 'oklch(0.66 0.02 265)',
+          // The total is unknown mid-sync, so the bar shows movement rather
+          // than a percentage it cannot honestly claim.
+          progress: syncing ? ((progress?.done ?? 0) % 100) : null,
+        }}
+        onSync={syncNow}
+        updateAvailable={update.available}
+        updateVersion={update.version}
         onOpenUpdater={() => setUpdaterOpen(true)}
         notifications={notifications}
         unread={unread}
@@ -162,14 +180,6 @@ export function App() {
       {updaterOpen && <Updater onClose={() => setUpdaterOpen(false)} />}
       <div className="shell">
       <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">R</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            <div className="brand-name">Resell Ops</div>
-            <div className="brand-sub">local · one seat</div>
-          </div>
-        </div>
-
         {NAV.map((item) => (
           <button
             key={item.label}
@@ -177,10 +187,17 @@ export function App() {
             onClick={() => setScreen(item.label)}
           >
             <span className="nav-left">
-              <span
-                className="nav-dot"
-                style={{ background: `oklch(0.76 0.13 ${item.hue})` }}
-              />
+              <svg
+                className="nav-icon"
+                viewBox="0 0 16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.35"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d={item.icon} />
+              </svg>
               <span>{item.label}</span>
             </span>
             {item.label === 'Settings' && (crashCount > 0 || (summary?.reviewCount ?? 0) > 0) && (
@@ -188,50 +205,11 @@ export function App() {
             )}
           </button>
         ))}
-
-        <div style={{ flex: 1 }} />
-
-        <button className="sync" onClick={syncNow} disabled={syncing}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span
-              style={{
-                width: 7, height: 7, borderRadius: '50%', flex: 'none',
-                background: syncing
-                  ? 'oklch(0.76 0.12 232)'
-                  : summary?.messageCount ? 'oklch(0.78 0.12 148)' : 'oklch(0.66 0.02 265)',
-                animation: syncing ? 'pulseGlow 1.4s ease-in-out infinite' : 'none',
-              }}
-            />
-            <span className="sync-title">{syncing ? 'Syncing mail' : 'Sync now'}</span>
-          </div>
-          {syncing && progress?.subject && (
-            <div
-              style={{
-                fontSize: 10, color: 'var(--text-ghost)', whiteSpace: 'nowrap',
-                overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%',
-              }}
-            >
-              {progress.subject}
-            </div>
-          )}
-          <div className="sync-detail">
-            {syncing
-              ? progress
-                ? `${progress.done} read · ${progress.stored} new`
-                : 'Connecting…'
-              : summary
-                ? `${summary.messageCount} message${summary.messageCount === 1 ? '' : 's'} · ${summary.eventCount} events`
-                : 'Starting up'}
-          </div>
-        </button>
       </aside>
 
         <main className="main">
         <header className="topbar">
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
-            <h1>{screen}</h1>
-            <div className="topbar-sub">{SUBTITLES[screen]}</div>
-          </div>
+          <div className="avatar">DN</div>
           <div style={{ flex: 1 }} />
           <div className="search">
             <span
@@ -246,7 +224,6 @@ export function App() {
               onChange={(event) => setQuery(event.target.value)}
             />
           </div>
-          <div className="avatar">DN</div>
         </header>
 
         {flash && (

@@ -66,10 +66,11 @@ app.whenReady().then(async () => {
     const state = await win.webContents.executeJavaScript(`
       (() => {
         const root = document.getElementById('root')
-        const heading = document.querySelector('h1')
+        // The screen name lives in the title bar, not an <h1> on the page.
+        const heading = document.querySelector('.titlebar-label')
         return {
           children: root ? root.children.length : 0,
-          heading: heading ? heading.textContent : null,
+          heading: heading ? heading.textContent.trim() : null,
           boundary: (document.body.innerText || '').includes('hit an error'),
         }
       })()

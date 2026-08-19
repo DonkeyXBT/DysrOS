@@ -68,12 +68,19 @@ export function NotificationBell({
         aria-label="Notifications"
       >
         <span className="bell-wrap">
-          <span className="bell-glyph" />
+          <svg
+            viewBox="0 0 16 16"
+            style={{ width: 15, height: 15 }}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.35"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M4 6.8a4 4 0 0 1 8 0c0 2.4.7 3.4 1.2 3.9H2.8C3.3 10.2 4 9.2 4 6.8M6.4 12.6a1.8 1.8 0 0 0 3.2 0" />
+          </svg>
           {unread > 0 && (
-            <span
-              className="bell-dot"
-              style={{ background: LEVEL_COLOUR[worst] }}
-            />
+            <span className="bell-dot" style={{ background: LEVEL_COLOUR[worst] }} />
           )}
         </span>
       </button>
@@ -83,7 +90,7 @@ export function NotificationBell({
           <div className="notif-head">
             <span>Notifications</span>
             {notifications.length > 0 && (
-              <button className="notif-clear" onClick={onClose}>Dismiss</button>
+              <button className="notif-clear" onClick={onClose}>Mark all read</button>
             )}
           </div>
 
