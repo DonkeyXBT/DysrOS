@@ -7,27 +7,27 @@ import {
 describe('extractTrackingFromUrl', () => {
   it('reads a PostNL 3S barcode from a track-and-trace path', () => {
     expect(extractTrackingFromUrl('https://jouw.postnl.nl/track-and-trace/3SABCD123456789-NL-1012AB'))
-      .toEqual({ carrier: 'postnl', trackingNumber: '3SABCD123456789' })
+      .toMatchObject({ carrier: 'postnl', trackingNumber: '3SABCD123456789' })
   })
 
   it('reads a PostNL barcode from a query parameter', () => {
     expect(extractTrackingFromUrl('https://jouw.postnl.nl/?barcode=3SXYZ987654321&country=NL'))
-      .toEqual({ carrier: 'postnl', trackingNumber: '3SXYZ987654321' })
+      .toMatchObject({ carrier: 'postnl', trackingNumber: '3SXYZ987654321' })
   })
 
   it('reads a DHL JVGL code', () => {
     expect(extractTrackingFromUrl('https://my.dhlecommerce.nl/home/tracktrace/JVGL01234567890123'))
-      .toEqual({ carrier: 'dhl', trackingNumber: 'JVGL01234567890123' })
+      .toMatchObject({ carrier: 'dhl', trackingNumber: 'JVGL01234567890123' })
   })
 
   it('reads a DHL JJD code from a query parameter', () => {
     expect(extractTrackingFromUrl('https://www.dhl.com/nl-nl/home/tracking.html?tracking-id=JJD000390009999999999'))
-      .toEqual({ carrier: 'dhl', trackingNumber: 'JJD000390009999999999' })
+      .toMatchObject({ carrier: 'dhl', trackingNumber: 'JJD000390009999999999' })
   })
 
   it('infers the carrier from the host when the code shape is unfamiliar', () => {
     expect(extractTrackingFromUrl('https://jouw.postnl.nl/track-and-trace/?barcode=CD123456789NL'))
-      .toEqual({ carrier: 'postnl', trackingNumber: 'CD123456789NL' })
+      .toMatchObject({ carrier: 'postnl', trackingNumber: 'CD123456789NL' })
   })
 
   it('returns null for a URL carrying no tracking code', () => {
@@ -66,7 +66,7 @@ describe('resolveTrackingLink', () => {
       'https://jouw.postnl.nl/track-and-trace/3SABCD123456789-NL-1012AB': { status: 200 },
     })
 
-    await expect(resolveTrackingLink(START, { fetcher })).resolves.toEqual({
+    await expect(resolveTrackingLink(START, { fetcher })).resolves.toMatchObject({
       carrier: 'postnl',
       trackingNumber: '3SABCD123456789',
       finalUrl: 'https://jouw.postnl.nl/track-and-trace/3SABCD123456789-NL-1012AB',
@@ -136,22 +136,22 @@ describe('resolveTrackingLink', () => {
 describe('carrier URL shapes bol.com actually redirects to', () => {
   it('reads a PostNL barcode and strips the destination suffix', () => {
     expect(extractTrackingFromUrl('https://jouw.postnl.nl/track-and-trace/3SBTC0294817263-NL-1012AB'))
-      .toEqual({ carrier: 'postnl', trackingNumber: '3SBTC0294817263' })
+      .toMatchObject({ carrier: 'postnl', trackingNumber: '3SBTC0294817263' })
   })
 
   it('reads the English PostNL path variant', () => {
     expect(extractTrackingFromUrl('https://jouw.postnl.nl/track-en-trace/3SBTC0294817263-NL-1012AB'))
-      .toEqual({ carrier: 'postnl', trackingNumber: '3SBTC0294817263' })
+      .toMatchObject({ carrier: 'postnl', trackingNumber: '3SBTC0294817263' })
   })
 
   it('reads a DHL eCommerce tracktrace path', () => {
     expect(extractTrackingFromUrl('https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600'))
-      .toEqual({ carrier: 'dhl', trackingNumber: 'JVGL0627463317265600' })
+      .toMatchObject({ carrier: 'dhl', trackingNumber: 'JVGL0627463317265600' })
   })
 
   it('reads a DHL parcel tracktrace path', () => {
     expect(extractTrackingFromUrl('https://my.dhlparcel.nl/home/tracktrace/JVGL0627463317265600'))
-      .toEqual({ carrier: 'dhl', trackingNumber: 'JVGL0627463317265600' })
+      .toMatchObject({ carrier: 'dhl', trackingNumber: 'JVGL0627463317265600' })
   })
 
   it('rejects a PostNL code of implausible length rather than truncating it', () => {
@@ -177,5 +177,33 @@ describe('carrier URL shapes bol.com actually redirects to', () => {
     await resolveTrackingLink('https://link.bol.com/t/TOKEN', { fetcher })
     expect(seen?.['user-agent']).toMatch(/Chrome/)
     expect(seen?.['sec-fetch-mode']).toBe('navigate')
+  })
+})
+
+describe('the postcode DHL puts beside the barcode', () => {
+  it('is kept apart from the barcode rather than appended to it', () => {
+    // A real sync stored `JVGL0637312004304176/3043LC` as the tracking code,
+    // which is neither a barcode nor anything the redirect tool can use.
+    expect(extractTrackingFromUrl('https://my.dhlecommerce.nl/home/tracktrace/JVGL0637312004304176/3043LC'))
+      .toEqual({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0637312004304176',
+        postalCode: '3043LC',
+      })
+  })
+
+  it('is taken from the parcel host too', () => {
+    expect(extractTrackingFromUrl('https://my.dhlparcel.nl/home/tracktrace/JVGL0627463317265600/1012AB'))
+      .toMatchObject({ trackingNumber: 'JVGL0627463317265600', postalCode: '1012AB' })
+  })
+
+  it('survives the interventions path the redirect tool uses', () => {
+    expect(extractTrackingFromUrl('https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600/3071NE/interventions'))
+      .toMatchObject({ trackingNumber: 'JVGL0627463317265600', postalCode: '3071NE' })
+  })
+
+  it('is null when the URL states only a barcode', () => {
+    expect(extractTrackingFromUrl('https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600'))
+      .toMatchObject({ trackingNumber: 'JVGL0627463317265600', postalCode: null })
   })
 })

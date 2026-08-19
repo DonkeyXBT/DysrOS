@@ -174,6 +174,8 @@ export function App() {
     <div className="app">
       <TitleBar
         screen={screen}
+        query={query}
+        onQuery={setQuery}
         sync={{
           title: syncing ? 'Syncing' : summary?.messageCount ? 'Synced' : 'Never synced',
           detail: syncing
@@ -261,25 +263,6 @@ export function App() {
       </aside>
 
         <main className="main">
-        <header className="topbar">
-          <div style={{ flex: 1 }} />
-          <div className="search">
-            <span
-              style={{
-                width: 11, height: 11, border: '1.5px solid #6f7789',
-                borderRadius: '50%', flex: 'none',
-              }}
-            />
-            <input
-              value={query}
-              placeholder="Search title or order ref"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-          </div>
-        </header>
-
-
-
         <div className="content">
           {/* Keyed by screen so moving to another screen clears a failed one. */}
           <ErrorBoundary area={screen} key={screen} onReset={() => void refresh()}>

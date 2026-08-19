@@ -18,6 +18,8 @@ export interface SyncState {
  */
 export function TitleBar({
   screen,
+  query,
+  onQuery,
   sync,
   onSync,
   updateAvailable,
@@ -30,6 +32,8 @@ export function TitleBar({
   onCloseNotifications,
 }: {
   screen: string
+  query: string
+  onQuery: (value: string) => void
   sync: SyncState
   onSync: () => void
   updateAvailable: boolean
@@ -50,9 +54,23 @@ export function TitleBar({
 
   return (
     <div className="titlebar">
-      <span className="titlebar-label">{screen}</span>
-      <div style={{ flex: 1 }} />
+      <div className="titlebar-side">
+        <span className="titlebar-label">{screen}</span>
+      </div>
 
+      {/* The middle of the bar was empty, and search belongs on the same line
+          as the controls rather than costing a row of its own. Both sides
+          share the remaining width equally, so this sits truly centred. */}
+      <div className="search titlebar-search">
+        <span className="search-glass" />
+        <input
+          value={query}
+          placeholder="Search title or order ref"
+          onChange={(event) => onQuery(event.target.value)}
+        />
+      </div>
+
+      <div className="titlebar-side titlebar-side-end">
       <div className="titlebar-actions">
         {updateAvailable && (
           <button className="pill pill-update" onClick={onOpenUpdater}>
@@ -130,6 +148,7 @@ export function TitleBar({
         >
           ✕
         </button>
+      </div>
       </div>
     </div>
   )

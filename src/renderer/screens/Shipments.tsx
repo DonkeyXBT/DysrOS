@@ -4,6 +4,7 @@ import { Pager, usePaged } from '../Pager.js'
 import { SkeletonTable } from '../Skeleton.js'
 import { ContextMenu, useContextMenu } from '../ContextMenu.js'
 import { Confirm } from '../Confirm.js'
+import { Thumb } from '../Thumb.js'
 
 const GRID = 'grid-template-columns:70px 110px 170px minmax(160px,1fr) 130px 100px 96px'
 
@@ -242,27 +243,30 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                       <span style={{ color: 'var(--text-ghost)' }}>not in the email</span>
                     )}
                   </div>
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap',
-                        overflow: 'hidden', textOverflow: 'ellipsis',
-                      }}
-                    >
-                      {shipment.quantity > 1 && (
-                        <span className="mono" style={{ color: 'var(--text-dimmer)' }}>
-                          {shipment.quantity}× </span>
-                      )}
-                      {shipment.title ?? '—'}
-                    </div>
-                    <div
-                      className="mono"
-                      style={{
-                        fontSize: 10,
-                        color: shipment.linkedToPurchase ? 'var(--teal)' : 'var(--text-ghost)',
-                      }}
-                    >
-                      {shipment.linkedToPurchase ? shipment.linked : `${shipment.linked} · no order yet`}
+                  <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
+                    <Thumb url={shipment.imageUrl} size={28} />
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 12, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+                          overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}
+                      >
+                        {shipment.quantity > 1 && (
+                          <span className="mono" style={{ color: 'var(--text-dimmer)' }}>
+                            {shipment.quantity}× </span>
+                        )}
+                        {shipment.title ?? '—'}
+                      </div>
+                      <div
+                        className="mono"
+                        style={{
+                          fontSize: 10,
+                          color: shipment.linkedToPurchase ? 'var(--teal)' : 'var(--text-ghost)',
+                        }}
+                      >
+                        {shipment.linkedToPurchase ? shipment.linked : `${shipment.linked} · no order yet`}
+                      </div>
                     </div>
                   </div>
                   <div>
@@ -281,7 +285,14 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                       {STATUS_LABEL[shipment.status]}
                     </span>
                   </div>
-                  <div className="cell-mono">{shipment.expectedDeliveryAt ?? '—'}</div>
+                  <div className="cell-mono" style={{ minWidth: 0 }}>
+                    {shipment.expectedDeliveryAt ?? '—'}
+                    {shipment.deliveryWindow && (
+                      <div style={{ fontSize: 10, color: 'var(--teal)' }}>
+                        {shipment.deliveryWindow}
+                      </div>
+                    )}
+                  </div>
                   <div className="cell-mono">{shipment.postalCode ?? '—'}</div>
                 </div>
               )
@@ -362,7 +373,11 @@ function Detail({ shipment, onClose }: { shipment: ShipmentView; onClose: () => 
 
       <Field label="Contents" value={shipment.title ?? '—'} />
       <Field label="Quantity" value={String(shipment.quantity)} mono />
-      <Field label="Expected" value={shipment.expectedDeliveryAt ?? '—'} mono />
+      <Field
+        label="Expected"
+        value={[shipment.expectedDeliveryAt, shipment.deliveryWindow].filter(Boolean).join(' · ') || '—'}
+        mono
+      />
       <Field label="Postcode" value={shipment.postalCode ?? '—'} mono />
       <Field label="City" value={shipment.city ?? '—'} />
 

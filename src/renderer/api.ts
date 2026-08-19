@@ -1,8 +1,10 @@
 export interface ShipmentView {
   id: string; direction: string; carrier: string
   trackingNumber: string | null; trackingUrl: string | null
-  linked: string; title: string | null; quantity: number; status: string
+  linked: string; title: string | null; imageUrl: string | null
+  quantity: number; status: string
   lastMovementAt: string | null; expectedDeliveryAt: string | null
+  deliveryWindow: string | null
   postalCode: string | null; city: string | null; dhlRedirectable: boolean
   linkedToPurchase: boolean
 }
@@ -25,7 +27,8 @@ export interface DashboardView {
 }
 
 export interface ItemView {
-  id: string; title: string; brand: string | null; sku: string | null
+  id: string; title: string; imageUrl: string | null
+  brand: string | null; sku: string | null
   size: string | null; condition: string; status: string
   cost: string; costMinor: number
   purchasedAt: string | null; daysHeld: number | null
@@ -114,6 +117,8 @@ interface Api {
   shipments(): Promise<ShipmentView[]>
   dashboard(): Promise<DashboardView>
   inventory(): Promise<ItemView[]>
+  /** The article photograph as a data URL, fetched once and kept on disk. */
+  productImage(url: string): Promise<string | null>
   purchases(): Promise<PurchaseView[]>
   cancellations(): Promise<CancellationView[]>
   review(): Promise<ReviewView[]>

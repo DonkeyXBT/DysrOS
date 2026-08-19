@@ -9,6 +9,7 @@ const api = {
   shipments: () => ipcRenderer.invoke('shipments'),
   dashboard: () => ipcRenderer.invoke('dashboard'),
   inventory: () => ipcRenderer.invoke('inventory'),
+  productImage: (url: string) => ipcRenderer.invoke('product-image', url),
   purchases: () => ipcRenderer.invoke('purchases'),
   cancellations: () => ipcRenderer.invoke('cancellations'),
   review: () => ipcRenderer.invoke('review'),

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
 import type { Db } from '../db/connection.js'
 import { EventRepo, type StoredEvent } from '../repos/events.js'
+import { findParcel, mergeInto } from './shipment-merge.js'
 
 /**
  * Turns parsed events into the entities the application reasons about:
@@ -117,11 +118,14 @@ export class Reconciler {
     for (let index = 0; index < quantity; index += 1) {
       this.db.prepare(
         `INSERT INTO items
-           (id, purchase_id, title, sku, size, condition, status, cost_minor,
+           (id, purchase_id, title, sku, size, condition, status, image_url, cost_minor,
             cost_currency, purchased_at, created_at)
-         VALUES (?, ?, ?, NULL, NULL, 'new', 'incoming', ?, ?, ?, ?)
+         VALUES (?, ?, ?, NULL, NULL, 'new', 'incoming', ?, ?, ?, ?, ?)
          ON CONFLICT(id) DO UPDATE SET
            title = excluded.title,
+           -- A later mail without a picture must not take away the one a
+           -- previous mail supplied.
+           image_url = COALESCE(excluded.image_url, items.image_url),
            cost_minor = excluded.cost_minor,
            cost_currency = excluded.cost_currency,
            purchased_at = excluded.purchased_at`,
@@ -129,6 +133,7 @@ export class Reconciler {
         itemKey(purchaseId, index),
         purchaseId,
         (payload.title as string | null) ?? 'Unknown item',
+        (payload.imageUrl as string | null) ?? null,
         unitMinor,
         currency,
         event.occurredAt,
@@ -156,6 +161,23 @@ export class Reconciler {
       ? this.findPurchaseId(event.retailer, event.externalOrderId)
       : null
 
+    // Mail carrying a barcode another mail already recorded describes the same
+    // parcel, not a new one. It updates that parcel instead of inserting a
+    // second row the unique index would refuse.
+    const barcode = (payload.trackingNumber as string | null) ?? null
+    if (barcode) {
+      const existing = findParcel(this.db, (payload.carrier as string) ?? 'unknown', barcode, event.id)
+      if (existing) {
+        mergeInto(this.db, existing, {
+          status: shipmentStatus(payload),
+          purchaseId,
+          trackingUrl: (payload.trackingUrl as string | null) ?? null,
+          expectedDeliveryAt: (payload.expectedDeliveryAt as string | null) ?? null,
+        })
+        return true
+      }
+    }
+
     // A shipment is worth recording whether or not its order was ever captured,
     // so this never holds the event back.
     this.db.prepare(
@@ -176,11 +198,19 @@ export class Reconciler {
       (payload.carrier as string) ?? 'unknown',
       (payload.trackingNumber as string | null) ?? null,
       (payload.trackingUrl as string | null) ?? null,
-      payload.trackingNumber ? 'in_transit' : 'pending',
+      shipmentStatus(payload),
       purchaseId,
       (payload.expectedDeliveryAt as string | null) ?? null,
       now,
     )
+
+    // Shipping mail carries the same article photograph. Where the order mail
+    // was never seen, or carried none, this is the picture the item gets.
+    if (purchaseId && payload.imageUrl) {
+      this.db.prepare(
+        'UPDATE items SET image_url = ? WHERE purchase_id = ? AND image_url IS NULL',
+      ).run(payload.imageUrl as string, purchaseId)
+    }
 
     return true
   }
@@ -258,4 +288,16 @@ export function itemKey(purchaseId: string, index: number): string {
 
 export function refundKey(purchaseId: string): string {
   return digest(`refund|${purchaseId}`)
+}
+
+/**
+ * What the shipments table records for a parcel.
+ *
+ * A parcel out with the courier says more than "in transit", and it says it on
+ * the day it matters, so it is kept rather than flattened. Without a barcode
+ * there is nothing to follow yet, which is what "pending" means here.
+ */
+function shipmentStatus(payload: Record<string, unknown>): string {
+  if (payload.shipmentStatus === 'out_for_delivery') return 'out_for_delivery'
+  return payload.trackingNumber ? 'in_transit' : 'pending'
 }

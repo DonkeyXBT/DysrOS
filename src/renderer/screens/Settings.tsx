@@ -28,7 +28,7 @@ export function Settings({
   const [confirming, setConfirming] = useState(false)
 
   return (
-    <div className="screen" style={{ gap: 13, maxWidth: 920, overflowY: 'auto' }}>
+    <div className="screen settings-grid">
       {confirming && (
         <Confirm
           title="Delete all data"
@@ -61,7 +61,11 @@ export function Settings({
         />
       )}
 
-      <Accounts onChanged={onAccountsChanged} onSync={onSync} syncing={syncing} />
+      {/* Mailboxes are the page's subject and carry a list, so they take the
+          full width; everything else pairs up beside its neighbour. */}
+      <div className="settings-wide">
+        <Accounts onChanged={onAccountsChanged} onSync={onSync} syncing={syncing} />
+      </div>
 
       <AycdPanel />
 
@@ -180,7 +184,10 @@ export function Settings({
         </div>
       </section>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 4, paddingBottom: 6 }}>
+      <div
+        className="settings-wide"
+        style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 4, paddingBottom: 6 }}
+      >
         <span style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
           Something gone wrong? Errors and crash reports are kept.
         </span>

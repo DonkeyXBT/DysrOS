@@ -19,7 +19,11 @@ import { AccountRepo, type Encryptor, type MailAccount, type NewAccount } from '
 import { MailboxSync } from '../core/mail/ingest.js'
 import { ImapFlowClient, testConnection, explainConnectionError } from '../core/mail/imapflow-client.js'
 import { AycdClient } from '../core/aycd/client.js'
-import { resolveTrackingLink, isNonCarrierBolLanding } from '../core/tracking/resolve-link.js'
+import {
+  resolveTrackingLink, isNonCarrierBolLanding, type ResolvedTracking,
+} from '../core/tracking/resolve-link.js'
+import { carrierTrackingUrl } from '../core/tracking/carrier-url.js'
+import { findParcel, foldShipment, furthestStatus, mergeInto } from '../core/reconcile/shipment-merge.js'
 import {
   sendToDiscord, sampleNotification, isWebhookUrl, maskWebhookUrl,
   type NotifiableEvent, type NotificationInput,
@@ -130,6 +134,25 @@ export class AppService {
     const hasEvents = (this.db.prepare('SELECT COUNT(*) AS n FROM events').get() as { n: number }).n
     if (hasEvents > 0) this.rebuildEntities()
     this.setSetting(ENTITIES_VERSION_SETTING, current)
+  }
+
+  /**
+   * What the parsers extracted when the stored events were made.
+   *
+   * Bump this when a parser starts extracting something it did not before.
+   * Stored events are not revisited otherwise, so mail already read would keep
+   * its old, thinner event — the product pictures added in 0.1.6 would only
+   * ever appear on mail that arrived afterwards.
+   */
+  static readonly PARSER_GENERATION = '2'
+
+  /** True when the mail already read predates the current parsers. */
+  needsReparse(): boolean {
+    return this.getSetting('parser_generation') !== AppService.PARSER_GENERATION
+  }
+
+  markReparsed(): void {
+    this.setSetting('parser_generation', AppService.PARSER_GENERATION)
   }
 
   getSetting(key: string): string | null {
@@ -321,7 +344,10 @@ export class AppService {
     const rows = this.db.prepare(
       `SELECT s.*, e.payload_json, e.retailer, e.external_order_id,
               p.title AS purchase_title,
-              (SELECT COUNT(*) FROM items i WHERE i.purchase_id = s.purchase_id) AS item_count
+              (SELECT COUNT(*) FROM items i WHERE i.purchase_id = s.purchase_id) AS item_count,
+              (SELECT i.image_url FROM items i
+                WHERE i.purchase_id = s.purchase_id AND i.image_url IS NOT NULL
+                LIMIT 1) AS item_image
        FROM shipments s
        LEFT JOIN events e ON e.id = s.id
        LEFT JOIN purchases p ON p.id = s.purchase_id
@@ -333,21 +359,34 @@ export class AppService {
         ? (JSON.parse(row.payload_json as string) as Record<string, unknown>)
         : {}
       const reference = (row.external_order_id as string | null) ?? null
+      const carrier = row.carrier as string
+      const trackingNumber = (row.tracking_number as string | null) ?? null
+      const postalCode = (payload.deliveryPostalCode as string | null)
+        ?? (row.postal_code as string | null)
+        ?? null
+      // Once the barcode and the postcode are both known, the carrier's own
+      // page can be addressed directly — which beats the retailer's redirect,
+      // and is the page that offers to redirect the parcel.
+      const built = carrierTrackingUrl(carrier, trackingNumber, postalCode)
       return {
         id: row.id as string,
         direction: row.direction as string,
-        carrier: row.carrier as string,
-        trackingNumber: (row.tracking_number as string | null) ?? null,
-        trackingUrl: (row.tracking_url as string | null) ?? null,
+        carrier,
+        trackingNumber,
+        trackingUrl: built ?? (row.tracking_url as string | null) ?? null,
         linked: `${(row.retailer as string) ?? 'unknown'} \u00b7 ${reference ?? '\u2014'}`,
         // The shipping mail names the contents; where it did not, the linked
         // order does, which is the point of matching them at all.
         title: (payload.title as string | null) ?? (row.purchase_title as string | null) ?? null,
+        // The shipping mail's own picture first, then the one the order left
+        // on the item it is carrying.
+        imageUrl: (payload.imageUrl as string | null) ?? (row.item_image as string | null) ?? null,
         quantity: (payload.quantity as number) ?? (row.item_count as number) ?? 1,
         status: row.status as string,
         lastMovementAt: (row.last_movement_at as string | null) ?? null,
         expectedDeliveryAt: (row.expected_delivery_at as string | null) ?? null,
-        postalCode: (payload.deliveryPostalCode as string | null) ?? null,
+        deliveryWindow: (payload.deliveryWindow as string | null) ?? null,
+        postalCode,
         city: (payload.deliveryCity as string | null) ?? null,
         dhlRedirectable: Boolean(payload.dhlRedirectable),
         /** True once the reconciler has matched this parcel to its order. */
@@ -460,6 +499,7 @@ export class AppService {
       return {
         id: row.id as string,
         title: row.title as string,
+        imageUrl: (row.image_url as string | null) ?? null,
         brand: (row.brand as string | null) ?? null,
         sku: (row.sku as string | null) ?? null,
         size: (row.size as string | null) ?? null,
@@ -747,8 +787,14 @@ export class AppService {
    * A parcel that fails is simply left for the next pass. Nothing is guessed.
    */
   async resolveTrackingCodes(
-    options: { limit?: number; onProgress?: (done: number, total: number) => void } = {},
+    options: {
+      limit?: number
+      onProgress?: (done: number, total: number) => void
+      /** Injected in tests; the real one follows the link over the network. */
+      resolve?: typeof resolveTrackingLink
+    } = {},
   ): Promise<{ attempted: number; resolved: number; failed: number }> {
+    const follow = options.resolve ?? resolveTrackingLink
     const limit = options.limit ?? 40
 
     const rows = this.db.prepare(
@@ -769,9 +815,9 @@ export class AppService {
         ? (payload.trackingCandidates as string[])
         : [payload.trackingUrl as string].filter(Boolean)
 
-      let found: { carrier: string; trackingNumber: string; finalUrl: string } | null = null
+      let found: ResolvedTracking | null = null
       for (const candidate of candidates) {
-        const result = await resolveTrackingLink(candidate)
+        const result = await follow(candidate)
         // Landing on the retailer's own login page means this link was never a
         // tracking link; try the next candidate rather than giving up.
         if (result && !isNonCarrierBolLanding(result.finalUrl)) {
@@ -781,11 +827,52 @@ export class AppService {
       }
 
       if (found) {
+        // Now that the barcode is known, the carrier's own page can be stored
+        // in place of the retailer redirect that expires.
+        // DHL states the postcode in its own tracking URL, so a parcel whose
+        // mail never gave an address can still get one.
+        const postalCode = (payload.deliveryPostalCode as string | null)
+          ?? found.postalCode
+          ?? null
+        const direct = carrierTrackingUrl(found.carrier, found.trackingNumber, postalCode)
+
+        // Another mail about this same parcel may have resolved first. Two
+        // rows for one barcode is what the unique index exists to prevent, so
+        // this one is folded into the row that got there first rather than
+        // failing the sync.
+        const existing = findParcel(this.db, found.carrier, found.trackingNumber, row.id)
+        if (existing) {
+          foldShipment(this.db, row.id, existing)
+          mergeInto(this.db, existing, {
+            trackingUrl: direct ?? found.finalUrl ?? null,
+            postalCode,
+            lastPolledAt: new Date().toISOString(),
+          })
+          resolved += 1
+          options.onProgress?.(index + 1, rows.length)
+          continue
+        }
+
+        // Finding the barcode says the parcel is followable, not that it is
+        // back at the depot: a parcel already out with the courier stays out
+        // with the courier.
+        const current = this.db
+          .prepare('SELECT status FROM shipments WHERE id = ?')
+          .get(row.id) as { status: string } | undefined
         this.db.prepare(
           `UPDATE shipments
-           SET tracking_number = ?, carrier = ?, status = 'in_transit', last_polled_at = ?
+           SET tracking_number = ?, carrier = ?, tracking_url = COALESCE(?, tracking_url),
+               postal_code = COALESCE(?, postal_code), status = ?, last_polled_at = ?
            WHERE id = ?`,
-        ).run(found.trackingNumber, found.carrier, new Date().toISOString(), row.id)
+        ).run(
+          found.trackingNumber,
+          found.carrier,
+          direct ?? found.finalUrl ?? null,
+          postalCode,
+          furthestStatus(current?.status ?? null, 'in_transit'),
+          new Date().toISOString(),
+          row.id,
+        )
         resolved += 1
       } else {
         this.db.prepare('UPDATE shipments SET last_polled_at = ? WHERE id = ?')
@@ -1343,10 +1430,13 @@ export interface ShipmentView {
   trackingUrl: string | null
   linked: string
   title: string | null
+  imageUrl: string | null
   quantity: number
   status: string
   lastMovementAt: string | null
   expectedDeliveryAt: string | null
+  /** `17:00–19:00` when the courier gave a window for today. */
+  deliveryWindow: string | null
   postalCode: string | null
   city: string | null
   dhlRedirectable: boolean
@@ -1411,6 +1501,8 @@ export type SyncProgressFn = (progress: {
 export interface ItemView {
   id: string
   title: string
+  /** The article photograph from the retailer's mail, if one was carried. */
+  imageUrl: string | null
   /** The parcel carrying this unit, once one is known. */
   carrier?: string | null
   trackingNumber?: string | null

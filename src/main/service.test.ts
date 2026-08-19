@@ -11,6 +11,7 @@ const FIXTURES = [
   'Je_artikel_is_geannuleerd_0.eml',
   'Je pakket is nu bij DHL.eml',
   'Je pakket is nu bij PostNL.eml',
+  'De_bezorger_is_onderweg_0.eml',
 ]
 
 function fixturePath(name: string): string {
@@ -67,15 +68,20 @@ describe.skipIf(!allPresent)('AppService importing real mail', () => {
   it('builds shipments carrying carrier, postcode and contents', async () => {
     await importAll()
     const shipments = service.listShipments()
-    expect(shipments).toHaveLength(2)
-    expect(shipments.map((s) => s.carrier).sort()).toEqual(['dhl', 'postnl'])
-    expect(shipments.every((s) => /^\d{4}[A-Z]{2}$/.test(s.postalCode ?? ''))).toBe(true)
+    // Three shipping mails: handed to DHL, handed to PostNL, and the courier
+    // out with one of them. Until the barcodes resolve they are separate rows.
+    expect(shipments).toHaveLength(3)
+    expect(shipments.map((s) => s.carrier).sort()).toEqual(['dhl', 'dhl', 'postnl'])
+    // The out-for-delivery mail states no address, so a postcode is not
+    // demanded of every parcel — only that the ones stating it read as one.
+    expect(shipments.filter((s) => s.postalCode !== null)).toHaveLength(2)
+    expect(shipments.every((s) => s.postalCode === null || /^\d{4}[A-Z]{2}$/.test(s.postalCode))).toBe(true)
     expect(shipments.every((s) => s.expectedDeliveryAt === '2026-08-19')).toBe(true)
   })
 
   it('reports shipments as awaiting a tracking code', async () => {
     await importAll()
-    expect(service.summary().awaitingTracking).toBe(2)
+    expect(service.summary().awaitingTracking).toBe(3)
     expect(service.listShipments().every((s) => s.trackingNumber === null)).toBe(true)
   })
 
@@ -104,7 +110,7 @@ describe.skipIf(!allPresent)('AppService importing real mail', () => {
     const parsers = service.listParsers()
     const byId = Object.fromEntries(parsers.map((p) => [p.id, p.parsed]))
     expect(byId['bol-order-confirmation']).toBe(2)
-    expect(byId['bol-shipment-confirmation']).toBe(2)
+    expect(byId['bol-shipment-confirmation']).toBe(3)
     expect(byId['bol-cancellation']).toBe(1)
   })
 })
@@ -160,7 +166,7 @@ describe.skipIf(!allPresent)('reconciled inventory', () => {
   it('links shipments to their purchase when the order is known', async () => {
     await importAll()
     const linked = service.listShipments()
-    expect(linked).toHaveLength(2)
+    expect(linked).toHaveLength(3)
   })
 
   it('stays stable when everything is imported twice', async () => {
@@ -588,8 +594,8 @@ describe.skipIf(!allPresent)('dashboard reports the operation, not the plumbing'
     await importAll()
     const dashboard = service.dashboard()
     expect(dashboard.inFlight.units).toBe(4)
-    expect(dashboard.inFlight.parcels).toBe(2)
-    expect(dashboard.inFlight.awaitingCode).toBe(2)
+    expect(dashboard.inFlight.parcels).toBe(3)
+    expect(dashboard.inFlight.awaitingCode).toBe(3)
   })
 
   it('keeps money owed back separate from money received', async () => {
@@ -707,7 +713,7 @@ describe.skipIf(!allPresent)('deleting records by hand', () => {
     const shipment = service.listShipments()[0]!
     service.deleteRecord('shipment', shipment.id)
 
-    expect(service.listShipments()).toHaveLength(1)
+    expect(service.listShipments()).toHaveLength(2)
     expect(service.listPurchases().filter((p) => p.kind === 'buy')).toHaveLength(2)
   })
 
@@ -742,5 +748,82 @@ describe.skipIf(!allPresent)('watching orders through to shipment', () => {
     await importAll()
     const dashboard = service.dashboard()
     expect(dashboard.bought.delivered).toBeLessThanOrEqual(dashboard.bought.shipped)
+  })
+})
+
+describe.skipIf(!allPresent)('two mails about one parcel', () => {
+  it('keeps one shipment when both resolve to the same barcode', async () => {
+    // The mail that hands the parcel to DHL and the mail that says the courier
+    // is out with it are separate events, and each starts out as its own
+    // shipment with no barcode. Resolving both used to fail the sync with
+    // "UNIQUE constraint failed: shipments.carrier, shipments.tracking_number".
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+
+    const before = service.listShipments()
+    expect(before.length).toBeGreaterThan(1)
+
+    const result = await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+
+    expect(result.failed).toBe(0)
+    const after = service.listShipments()
+    expect(after.filter((s) => s.trackingNumber === 'JVGL0627463317265600')).toHaveLength(1)
+  })
+
+  it('shows the parcel at its furthest point, not its earliest', async () => {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+
+    const parcel = service.listShipments().find((s) => s.trackingNumber === 'JVGL0627463317265600')
+    expect(parcel?.status).toBe('out_for_delivery')
+  })
+})
+
+describe.skipIf(!allPresent)('the postcode the carrier URL reveals', () => {
+  it('is kept, so a parcel whose mail gave no address still has one', async () => {
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+    expect(service.listShipments()[0]!.postalCode).toBeNull()
+
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        postalCode: '3071NE',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600/3071NE',
+      }),
+    })
+
+    const parcel = service.listShipments()[0]!
+    expect(parcel.postalCode).toBe('3071NE')
+    expect(parcel.trackingNumber).toBe('JVGL0627463317265600')
+    // And with both known, the link goes straight to the carrier's own page.
+    expect(parcel.trackingUrl).toBe('https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600/3071NE')
+  })
+
+  it('lets the DHL redirect export include a parcel the mail said nothing about', async () => {
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        postalCode: '3071NE',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600/3071NE',
+      }),
+    })
+
+    expect(service.redirectCsv()).toContain('JVGL0627463317265600,3071NE')
   })
 })

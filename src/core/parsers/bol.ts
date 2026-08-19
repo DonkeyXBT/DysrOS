@@ -4,6 +4,7 @@ import type { Parser } from './registry.js'
 import { parseDutchAmount, parseDutchDayMonth } from './nl.js'
 import { classifyShipment, findShipmentTitle } from './bol-shipment-status.js'
 import { collectTrackingCandidates } from '../tracking/bol-links.js'
+import { findProductImage } from './product-image.js'
 
 /**
  * Parsers for bol.com.
@@ -187,6 +188,7 @@ export const bolOrderConfirmation: Parser = {
       payload: {
         title,
         titleTruncated: title !== null && title.endsWith('...'),
+        imageUrl: findProductImage(message.html, title),
         seller: valueOnLabelledLine(all, 'Verkoper'),
         quantity,
         currency: 'EUR',
@@ -235,6 +237,7 @@ export const bolCancellation: Parser = {
       occurredAt: message.receivedAt,
       payload: {
         title,
+        imageUrl: findProductImage(message.html, title),
         quantity: titleIndex === -1 ? 1 : quantityAfter(all, titleIndex),
         // bol.com states no amount in this mail, so the refund value has to come
         // from the original order rather than be guessed here.
@@ -280,9 +283,18 @@ export const bolShipmentConfirmation: Parser = {
     const title = findShipmentTitle(all, message.html)
 
     const deliveryMatch = /bezorgd op ([a-zà-ü]+dag\s+\d{1,2}\s+[a-zà-ü]+)/i.exec(body)
+    // "tussen 17:00 en 19:00 uur" — the window the courier gave, worth keeping
+    // whole rather than reducing to a date.
+    const windowMatch = /tussen\s+(\d{1,2}[:.]\d{2})\s+en\s+(\d{1,2}[:.]\d{2})/i.exec(body)
+    const deliveryWindow = windowMatch
+      ? `${windowMatch[1]!.replace('.', ':')}–${windowMatch[2]!.replace('.', ':')}`
+      : null
+    const outForDelivery = variant?.status === 'out_for_delivery'
     const expectedDeliveryAt = deliveryMatch
       ? parseDutchDayMonth(deliveryMatch[1]!.replace(/^[a-zà-ü]+dag\s+/i, ''), message.receivedAt)
-      : null
+      // The courier is out with it now, so the day it arrives is the day the
+      // mail was sent, whether or not the mail spells the date out.
+      : outForDelivery ? message.receivedAt.slice(0, 10) : null
 
     // bol.com does not put the carrier barcode in the mail. The only tracking
     // handle is an opaque redirect, which resolves to the real code only by
@@ -307,8 +319,11 @@ export const bolShipmentConfirmation: Parser = {
         direction: 'inbound',
         title,
         titleTruncated: title !== null && title.endsWith('...'),
+        imageUrl: findProductImage(message.html, title),
         quantity: quantityNear(all, title),
         expectedDeliveryAt,
+        deliveryWindow,
+        outForDelivery,
         shipmentStatus: variant?.status ?? 'shipped_unknown_carrier',
         delayed,
         trackingNumber: null,
@@ -348,6 +363,7 @@ export const bolShipmentPending: Parser = {
       occurredAt: message.receivedAt,
       payload: {
         stage: 'awaiting_carrier',
+        imageUrl: findProductImage(message.html, null),
         trackingUrl: /https:\/\/link\.bol\.com\/t\/[^\s"'<>\]]+/.exec(message.html)?.[0] ?? null,
       },
     }]
