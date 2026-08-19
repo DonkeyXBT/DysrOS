@@ -16,6 +16,8 @@ let rescanTimer: NodeJS.Timeout | null = null
 let hourlyTimer: NodeJS.Timeout | null = null
 let trackingTimer: NodeJS.Timeout | null = null
 let trackingInFlight = false
+let updateTimer: NodeJS.Timeout | null = null
+let lastOfferedVersion: string | null = null
 /** Guards against a scheduled sync starting on top of one already running. */
 let syncInFlight = false
 
@@ -27,6 +29,8 @@ const HOURLY_SYNC_MS = 60 * 60 * 1000
  * leaves parcels without codes for no good reason.
  */
 const TRACKING_SWEEP_MS = 10 * 60 * 1000
+/** How often to ask whether a newer build has been published. */
+const UPDATE_CHECK_MS = 5 * 60 * 1000
 /** How often a running sync pushes its results to the screens. Often enough to
  *  feel live, rarely enough not to re-query the database for every message. */
 const LIVE_REFRESH_EVERY = 20
@@ -357,6 +361,30 @@ app.whenReady().then(() => {
     }
   })
 
+  /**
+   * Asks whether a newer build exists and tells the window when one appears.
+   *
+   * Only the first sighting of a given version is announced: repeating it every
+   * five minutes would turn a useful notice into noise.
+   */
+  async function checkForUpdate(): Promise<void> {
+    if (!app.isPackaged) return
+    try {
+      const result = await autoUpdater.checkForUpdates()
+      const version = result?.updateInfo?.version
+      if (!version || version === app.getVersion() || version === lastOfferedVersion) return
+      lastOfferedVersion = version
+      log.record('info', 'updater', `update available: ${version}`)
+      mainWindow?.webContents.send('update-available', { version })
+    } catch (error) {
+      // A failed check is not worth surfacing; the next one is five minutes away.
+      log.record('warn', 'updater', error)
+    }
+  }
+
+  updateTimer = setInterval(() => void checkForUpdate(), UPDATE_CHECK_MS)
+  setTimeout(() => void checkForUpdate(), 15_000)
+
   ipcMain.handle('download-update', async () => {
     await autoUpdater.downloadUpdate()
     return { started: true }
@@ -566,6 +594,7 @@ app.whenReady().then(() => {
 app.on('before-quit', () => {
   if (hourlyTimer) clearInterval(hourlyTimer)
   if (trackingTimer) clearInterval(trackingTimer)
+  if (updateTimer) clearInterval(updateTimer)
   // The watcher owns a repeating timer; leaving it running holds the process open.
   void service?.stopAycdWatch()
 })

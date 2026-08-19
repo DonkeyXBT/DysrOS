@@ -139,7 +139,38 @@ export function maskWebhookUrl(url: string): string {
 export type PostFn = (
   url: string,
   init: { method: string; headers: Record<string, string>; body: string },
-) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>
+) => Promise<{
+  ok: boolean
+  status: number
+  text(): Promise<string>
+  headers?: { get(name: string): string | null }
+}>
+
+/** Discord rate limits per webhook; a burst of notifications hits it easily. */
+export const MAX_ATTEMPTS = 4
+const BASE_BACKOFF_MS = 1000
+/** However long Discord asks us to wait, never block for longer than this. */
+const MAX_WAIT_MS = 15_000
+
+export type SleepFn = (ms: number) => Promise<void>
+
+/**
+ * How long to wait before retrying.
+ *
+ * Discord says how long in `Retry-After`; obeying it is the difference between
+ * clearing the limit and extending it. Without one, back off exponentially.
+ */
+export function retryDelayMs(
+  attempt: number,
+  retryAfterHeader: string | null,
+): number {
+  const stated = Number(retryAfterHeader)
+  if (Number.isFinite(stated) && stated > 0) {
+    // The header is in seconds, and some responses use fractions of one.
+    return Math.min(MAX_WAIT_MS, Math.ceil(stated * 1000))
+  }
+  return Math.min(MAX_WAIT_MS, BASE_BACKOFF_MS * 2 ** (attempt - 1))
+}
 
 export interface SendResult {
   ok: boolean
@@ -150,35 +181,55 @@ export async function sendToDiscord(
   webhookUrl: string,
   inputs: NotificationInput[],
   post: PostFn = globalThis.fetch as unknown as PostFn,
+  sleep: SleepFn = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 ): Promise<SendResult> {
   if (!isWebhookUrl(webhookUrl)) {
     return { ok: false, message: 'That does not look like a Discord webhook URL.' }
   }
   if (inputs.length === 0) return { ok: true, message: 'Nothing to send.' }
 
-  try {
-    const response = await post(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(buildPayload(inputs)),
-    })
+  const body = JSON.stringify(buildPayload(inputs))
+  let lastMessage = 'Discord could not be reached.'
 
-    if (response.ok) {
-      return { ok: true, message: `Sent ${Math.min(inputs.length, 10)} notification(s).` }
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    try {
+      const response = await post(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+      })
+
+      if (response.ok) {
+        return { ok: true, message: `Sent ${Math.min(inputs.length, 10)} notification(s).` }
+      }
+
+      // Rate limiting and server faults are worth waiting out; a wrong token or
+      // a deleted webhook will never succeed, so retrying only wastes time.
+      const worthRetrying = response.status === 429 || response.status >= 500
+      if (!worthRetrying) {
+        if (response.status === 404) {
+          return { ok: false, message: 'Discord does not recognise that webhook. It may have been deleted.' }
+        }
+        if (response.status === 401 || response.status === 403) {
+          return { ok: false, message: 'Discord rejected the webhook token.' }
+        }
+        return { ok: false, message: `Discord returned ${response.status}: ${await response.text()}` }
+      }
+
+      lastMessage = response.status === 429
+        ? 'Discord rate limited this webhook.'
+        : `Discord returned ${response.status}.`
+
+      if (attempt < MAX_ATTEMPTS) {
+        await sleep(retryDelayMs(attempt, response.headers?.get('retry-after') ?? null))
+      }
+    } catch (error) {
+      lastMessage = error instanceof Error ? error.message : String(error)
+      if (attempt < MAX_ATTEMPTS) await sleep(retryDelayMs(attempt, null))
     }
-    if (response.status === 404) {
-      return { ok: false, message: 'Discord does not recognise that webhook. It may have been deleted.' }
-    }
-    if (response.status === 401 || response.status === 403) {
-      return { ok: false, message: 'Discord rejected the webhook token.' }
-    }
-    if (response.status === 429) {
-      return { ok: false, message: 'Discord is rate limiting this webhook. Try again shortly.' }
-    }
-    return { ok: false, message: `Discord returned ${response.status}: ${await response.text()}` }
-  } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) }
   }
+
+  return { ok: false, message: `${lastMessage} Gave up after ${MAX_ATTEMPTS} attempts.` }
 }
 
 /** A representative embed for the "send test message" button. */

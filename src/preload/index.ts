@@ -33,6 +33,11 @@ const api = {
     ipcRenderer.on('update-progress', listener)
     return () => ipcRenderer.removeListener('update-progress', listener)
   },
+  onUpdateAvailable: (handler: (info: { version: string }) => void) => {
+    const listener = (_e: unknown, info: { version: string }) => handler(info)
+    ipcRenderer.on('update-available', listener)
+    return () => ipcRenderer.removeListener('update-available', listener)
+  },
   onUpdateDownloaded: (handler: (info: { version: string }) => void) => {
     const listener = (_e: unknown, info: { version: string }) => handler(info)
     ipcRenderer.on('update-downloaded', listener)

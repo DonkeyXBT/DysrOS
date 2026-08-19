@@ -6,11 +6,13 @@ import { Purchases } from './screens/Purchases.js'
 import { Review } from './screens/Review.js'
 import { Settings } from './screens/Settings.js'
 import { Inventory } from './screens/Inventory.js'
+import { Reports } from './screens/Reports.js'
 import { Placeholder } from './screens/Placeholder.js'
 import { Logs } from './screens/Logs.js'
 import { TitleBar } from './TitleBar.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import type { AppNotification } from './Notifications.js'
+import { Toasts } from './Toasts.js'
 import { Updater } from './Updater.js'
 
 /** Nav order and per-item hue, both taken from the mockup. */
@@ -35,11 +37,20 @@ type Extra = 'Logs' | 'Review'
 
 export type Screen = (typeof NAV)[number]['label'] | Extra
 
+/** Initials from an address, so the chip identifies the mailbox it belongs to. */
+function initials(email: string | null): string {
+  if (!email) return '—'
+  const name = email.split('@')[0] ?? ''
+  const parts = name.split(/[._-]+/).filter(Boolean)
+  if (parts.length >= 2) return (parts[0]![0]! + parts[1]![0]!).toUpperCase()
+  return name.slice(0, 2).toUpperCase() || '—'
+}
+
 export function App() {
   const [screen, setScreen] = useState<Screen>('Dashboard')
   const [summary, setSummary] = useState<SummaryView | null>(null)
   const [query, setQuery] = useState('')
-  const [flash, setFlash] = useState<string | null>(null)
+  const [toasts, setToasts] = useState<AppNotification[]>([])
   const [updaterOpen, setUpdaterOpen] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [crashCount, setCrashCount] = useState(0)
@@ -56,17 +67,24 @@ export function App() {
   const [update, setUpdate] = useState<{ available: boolean; version: string | null }>({
     available: false, version: null,
   })
+  const [mailboxes, setMailboxes] = useState<string[]>([])
 
+  /** Everything worth saying appears as a passing toast and stays in the bell. */
   const notify = useCallback((level: AppNotification['level'], text: string) => {
-    setNotifications((current) => [
-      { id: Date.now() + Math.floor(performance.now()), at: new Date().toISOString(), level, text },
-      ...current,
-    ].slice(0, 50))
+    const entry: AppNotification = {
+      id: Date.now() + Math.floor(performance.now()),
+      at: new Date().toISOString(),
+      level,
+      text,
+    }
+    setNotifications((current) => [entry, ...current].slice(0, 50))
+    setToasts((current) => [...current, entry].slice(-4))
     setUnread((n) => n + 1)
   }, [])
 
   const refresh = useCallback(async () => {
     setSummary(await api.summary())
+    setMailboxes((await api.accounts()).filter((a) => a.enabled).map((a) => a.email))
   }, [])
 
   useEffect(() => {
@@ -74,6 +92,10 @@ export function App() {
     // The update pill only appears when there is genuinely something to install.
     void api.checkForUpdate().then((status) => {
       setUpdate({ available: status.available, version: status.version ?? null })
+    })
+    const offUpdate = api.onUpdateAvailable((info) => {
+      setUpdate({ available: true, version: info.version })
+      notify('info', `Update available · version ${info.version}`)
     })
     // The main process ingests on launch and whenever new mail lands, so the UI
     // follows along rather than asking anyone to import anything.
@@ -108,6 +130,7 @@ export function App() {
       offMail()
       offCrash()
       offProgress()
+      offUpdate()
       window.removeEventListener('error', onError)
       window.removeEventListener('unhandledrejection', onRejection)
     }
@@ -121,7 +144,6 @@ export function App() {
   const syncNow = useCallback(async () => {
     if (syncing) return
     setSyncing(true)
-    setFlash(null)
     setProgress(null)
     try {
       const result = await api.syncAccounts()
@@ -131,18 +153,22 @@ export function App() {
           ? 'No mailbox connected yet - add one in Settings.'
           : `Pulled ${result.fetched} message${result.fetched === 1 ? '' : 's'} from ` +
             `${result.accounts} account${result.accounts === 1 ? '' : 's'} - ${result.stored} new`
-      setFlash(message)
       notify(result.failures.length > 0 ? 'warn' : 'info', message)
       await refresh()
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      setFlash(message)
-      notify('error', message)
+      notify('error', error instanceof Error ? error.message : String(error))
     } finally {
       setSyncing(false)
       setProgress(null)
     }
   }, [refresh, syncing, notify])
+
+  const account = {
+    primary: mailboxes[0] ?? null,
+    label: mailboxes.length > 1
+      ? `${mailboxes.length} mailboxes`
+      : mailboxes.length === 1 ? 'Connected' : 'Connect one in Settings',
+  }
 
   return (
     <div className="app">
@@ -178,8 +204,13 @@ export function App() {
         onCloseNotifications={() => setBellOpen(false)}
       />
       {updaterOpen && <Updater onClose={() => setUpdaterOpen(false)} />}
+      <Toasts
+        toasts={toasts}
+        onExpire={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))}
+      />
       <div className="shell">
       <aside className="sidebar">
+        <div className="sidebar-nav">
         {NAV.map((item) => (
           <button
             key={item.label}
@@ -205,11 +236,32 @@ export function App() {
             )}
           </button>
         ))}
+        </div>
+
+        <button
+          className="account-chip"
+          onClick={() => setScreen('Settings')}
+          title="Mailboxes and settings"
+        >
+          <span className="account-avatar">{initials(account.primary)}</span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+            <span
+              style={{
+                fontSize: 12, fontWeight: 700, whiteSpace: 'nowrap',
+                overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              {account.primary ?? 'No mailbox'}
+            </span>
+            <span style={{ fontSize: 10.5, color: 'var(--text-faint)' }}>
+              {account.label}
+            </span>
+          </span>
+        </button>
       </aside>
 
         <main className="main">
         <header className="topbar">
-          <div className="avatar">DN</div>
           <div style={{ flex: 1 }} />
           <div className="search">
             <span
@@ -226,15 +278,7 @@ export function App() {
           </div>
         </header>
 
-        {flash && (
-          <div className="banner">
-            <span className="banner-dot" />
-            <span>{flash}</span>
-            <button className="btn" style={{ marginLeft: 'auto' }} onClick={() => setFlash(null)}>
-              Dismiss
-            </button>
-          </div>
-        )}
+
 
         <div className="content">
           {/* Keyed by screen so moving to another screen clears a failed one. */}
@@ -268,7 +312,8 @@ export function App() {
               reviewCount={summary?.reviewCount ?? 0}
             />
           )}
-          {(screen === 'Sales' || screen === 'Reports') && (
+          {screen === 'Reports' && <Reports dataVersion={dataVersion} />}
+          {screen === 'Sales' && (
             <Placeholder screen={screen} />
           )}
           </ErrorBoundary>

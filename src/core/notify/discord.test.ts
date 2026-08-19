@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { money } from '../money.js'
 import {
   buildEmbed, buildPayload, isWebhookUrl, maskWebhookUrl, sendToDiscord,
-  sampleNotification, type NotificationInput, type PostFn,
+  sampleNotification, retryDelayMs, MAX_ATTEMPTS, type NotificationInput, type PostFn,
 } from './discord.js'
 
 function input(overrides: Partial<NotificationInput> = {}): NotificationInput {
@@ -141,7 +141,10 @@ describe('sending', () => {
 
   it('explains rate limiting', async () => {
     const { post } = fakePost({ ok: false, status: 429 })
-    const result = await sendToDiscord('https://discord.com/api/webhooks/1/tok', [input()], post)
+    // No real waiting: the retry delays are asserted separately.
+    const result = await sendToDiscord(
+      'https://discord.com/api/webhooks/1/tok', [input()], post, async () => {},
+    )
     expect(result.message).toMatch(/rate limit/i)
   })
 
@@ -149,7 +152,9 @@ describe('sending', () => {
     const post: PostFn = async () => {
       throw new Error('getaddrinfo ENOTFOUND discord.com')
     }
-    const result = await sendToDiscord('https://discord.com/api/webhooks/1/tok', [input()], post)
+    const result = await sendToDiscord(
+      'https://discord.com/api/webhooks/1/tok', [input()], post, async () => {},
+    )
     expect(result.ok).toBe(false)
     expect(result.message).toContain('ENOTFOUND')
   })
@@ -167,5 +172,80 @@ describe('test message', () => {
     const embed = buildEmbed(sampleNotification('2026-08-19T10:00:00.000Z'))
     expect(embed.fields.some((f) => f.name === 'Carrier')).toBe(true)
     expect(embed.title).toContain('Pokémon')
+  })
+})
+
+describe('surviving rate limits', () => {
+  function countingPost(statuses: number[], retryAfter?: string) {
+    const calls: number[] = []
+    const post: PostFn = async () => {
+      const status = statuses[calls.length] ?? 204
+      calls.push(status)
+      return {
+        ok: status >= 200 && status < 300,
+        status,
+        text: async () => '',
+        headers: { get: (name: string) => (name === 'retry-after' ? retryAfter ?? null : null) },
+      }
+    }
+    return { post, calls }
+  }
+
+  const noSleep = async () => {}
+
+  it('retries a rate limit and succeeds on a later attempt', async () => {
+    const { post, calls } = countingPost([429, 429, 204])
+    const result = await sendToDiscord('https://discord.com/api/webhooks/1/tok', [input()], post, noSleep)
+
+    expect(result.ok).toBe(true)
+    expect(calls).toEqual([429, 429, 204])
+  })
+
+  it('gives up after a bounded number of attempts rather than hammering', async () => {
+    const { post, calls } = countingPost([429, 429, 429, 429, 429, 429])
+    const result = await sendToDiscord('https://discord.com/api/webhooks/1/tok', [input()], post, noSleep)
+
+    expect(result.ok).toBe(false)
+    expect(calls).toHaveLength(MAX_ATTEMPTS)
+    expect(result.message).toMatch(/gave up after/i)
+  })
+
+  it('waits as long as Discord asks, not a guess of its own', async () => {
+    // Obeying Retry-After is the difference between clearing the limit and
+    // extending it.
+    expect(retryDelayMs(1, '2')).toBe(2000)
+    expect(retryDelayMs(1, '0.75')).toBe(750)
+  })
+
+  it('backs off exponentially when no delay is stated', () => {
+    expect(retryDelayMs(1, null)).toBe(1000)
+    expect(retryDelayMs(2, null)).toBe(2000)
+    expect(retryDelayMs(3, null)).toBe(4000)
+  })
+
+  it('never waits absurdly long, whatever the header says', () => {
+    expect(retryDelayMs(1, '600')).toBeLessThanOrEqual(15_000)
+    expect(retryDelayMs(9, null)).toBeLessThanOrEqual(15_000)
+  })
+
+  it('retries a server fault too', async () => {
+    const { post, calls } = countingPost([503, 204])
+    const result = await sendToDiscord('https://discord.com/api/webhooks/1/tok', [input()], post, noSleep)
+    expect(result.ok).toBe(true)
+    expect(calls).toHaveLength(2)
+  })
+
+  it('does not retry a rejected token, which will never succeed', async () => {
+    const { post, calls } = countingPost([401, 204])
+    const result = await sendToDiscord('https://discord.com/api/webhooks/1/tok', [input()], post, noSleep)
+
+    expect(result.ok).toBe(false)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('does not retry a deleted webhook', async () => {
+    const { post, calls } = countingPost([404, 204])
+    await sendToDiscord('https://discord.com/api/webhooks/1/tok', [input()], post, noSleep)
+    expect(calls).toHaveLength(1)
   })
 })
