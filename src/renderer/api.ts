@@ -34,6 +34,10 @@ export interface RedirectReportView {
   message: string
 }
 export interface DashboardView {
+  topProducts: {
+    title: string; units: number; spend: string; spendMinor: number
+    lastBoughtAt: string | null; imageUrl: string | null
+  }[]
   bought: { orders: number; units: number; spend: string; shipped: number; delivered: number }
   inFlight: { units: number; parcels: number; awaitingCode: number }
   stock: { units: number; capital: string; capitalMinor: number }

@@ -1,5 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { existsSync } from 'node:fs'
+import Database from 'better-sqlite3'
+import { existsSync, mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppService } from './service.js'
 import type { CompletedTask, MailTask } from '../core/aycd/client.js'
@@ -1605,5 +1608,74 @@ describe.skipIf(!allPresent)('a sale sticks', () => {
     // The VAT on both sides is still recorded, for the return.
     expect(after.soldVatMinor).toBe(1302)
     expect(after.costVatMinor).toBeGreaterThan(0)
+  })
+})
+
+describe.skipIf(!allPresent)('the article bought most often', () => {
+  it('is the one with the most units, with what it has cost', async () => {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    await service.importEml(fixturePath('Bedankt_voor_je_bestelling_0.eml'))
+
+    const top = service.dashboard().topProducts[0]!
+    // Three of the LEGO set against one of the other order.
+    expect(top.units).toBe(3)
+    expect(top.title).toContain('LEGO')
+    expect(top.spendMinor).toBe(3 * 5399)
+  })
+
+  it('counts the same article from two orders as one article', async () => {
+    // Both order fixtures contain the same LEGO set, ordered separately.
+    await service.importEml(fixturePath('Bedankt_voor_je_bestelling_0.eml'))
+    const fromOneOrder = service.dashboard().topProducts[0]!
+
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    const both = service.dashboard().topProducts[0]!
+
+    expect(both.title).toBe(fromOneOrder.title)
+    expect(both.units).toBeGreaterThanOrEqual(fromOneOrder.units)
+  })
+
+  it('lists the leaders, most units first', async () => {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    await service.importEml(fixturePath('Bedankt_voor_je_bestelling_0.eml'))
+
+    const products = service.dashboard().topProducts
+    expect(products.length).toBeGreaterThan(1)
+    expect(products[0]!.units).toBeGreaterThanOrEqual(products[1]!.units)
+  })
+
+  it('is empty before anything has been bought', () => {
+    expect(service.dashboard().topProducts).toEqual([])
+  })
+})
+
+describe.skipIf(!allPresent)('a sale that lost its unit is recovered', () => {
+  it('reconnects the sale and puts the unit back to sold', async () => {
+    const path = join(mkdtempSync(join(tmpdir(), 'resell-ops-')), 'test.db')
+    const cipher = { encrypt: (p: string) => p, decrypt: (c: string) => c }
+
+    const first = new AppService(path, cipher)
+    await first.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    const unit = first.listInventory()[0]!
+    first.sellItems([unit.id], {
+      amountMinor: 13000, includesVat: true, buyer: 'Twan', soldAt: '2026-08-19T10:00:00.000Z',
+    })
+
+    // Exactly the damage the old rebuild did: the sale survives, the unit it
+    // sold does not, and the money then counts as profit against nothing.
+    const raw = new Database(path)
+    raw.prepare('UPDATE sales SET item_id = NULL').run()
+    raw.prepare("UPDATE items SET status = 'in_stock'").run()
+    raw.close()
+
+    // Reopening repairs it: a sale's identity is derived from the unit it sold
+    // and the day it was sold, so the pairing can be worked out again.
+    const reopened = new AppService(path, cipher)
+
+    const sold = reopened.listInventory().filter((item) => item.soldMinor !== null)
+    expect(sold).toHaveLength(1)
+    expect(sold[0]!.status).toBe('sold')
+    expect(sold[0]!.buyer).toBe('Twan')
+    expect(reopened.dashboard().profit.netMinor).toBe(13000 - unit.costMinor)
   })
 })

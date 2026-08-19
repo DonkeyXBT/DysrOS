@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type DashboardView } from '../api.js'
 import { SkeletonDashboard } from '../Skeleton.js'
+import { Thumb } from '../Thumb.js'
 
 /**
  * The dashboard from the design: pipeline, profit, capital, KPIs, and what
@@ -77,11 +78,10 @@ export function Dashboard({
           <Capital data={data} onGo={onGo} />
         </Card>
 
-        <div
-          style={{
-            display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 10,
-          }}
-        >
+        {/* Shipped, and what is bought most. Parcels waiting for a code, money
+            owed back and unrecognised mail all look after themselves — they
+            were counters of the plumbing rather than of the business. */}
+        <div style={{ display: 'grid', gridTemplateRows: 'auto 1fr', gap: 10, minHeight: 0 }}>
           <Kpi
             label="Shipped"
             value={`${data.bought.shipped}/${data.bought.orders}`}
@@ -94,31 +94,10 @@ export function Dashboard({
             fill={data.bought.orders === 0 ? 0 : data.bought.shipped / data.bought.orders}
             onClick={() => onGo('Shipments')}
           />
-          <Kpi
-            label="Awaiting code"
-            value={String(data.inFlight.awaitingCode)}
-            meta={data.inFlight.awaitingCode > 0 ? 'looked up automatically' : 'all parcels tracked'}
-            hue={200}
-            fill={data.inFlight.parcels === 0 ? 0 : data.inFlight.awaitingCode / data.inFlight.parcels}
-            onClick={() => onGo('Shipments')}
-          />
-          <Kpi
-            label="Owed back"
-            value={data.cancelled.owed}
-            meta={`${data.cancelled.units} cancelled unit${data.cancelled.units === 1 ? '' : 's'}`}
-            hue={350}
-            fill={data.cancelled.owedMinor > 0 ? 1 : 0}
-            alert={data.cancelled.owedMinor > 0}
-            onClick={() => onGo('Purchases')}
-          />
-          <Kpi
-            label="Unrecognised"
-            value={String(data.reviewCount)}
-            meta={data.reviewCount > 0 ? 'waiting in review' : 'everything understood'}
-            hue={285}
-            fill={data.reviewCount > 0 ? 1 : 0}
-            onClick={() => onGo('Settings')}
-          />
+
+          <Card title="Most bought" note="units of each article">
+            <MostBought products={data.topProducts} onGo={onGo} />
+          </Card>
         </div>
 
         <div
@@ -142,6 +121,44 @@ export function Dashboard({
               {attention.length === 0 ? 'nothing right now' : 'most pressing first'}
             </span>
           </div>
+
+          {/* The article you buy most, standing above the passing notices: it
+              is the position you are deepest in, and it changes slowly. */}
+          {data.topProducts[0] && (
+            <button
+              onClick={() => onGo('Inventory')}
+              title="Show this in inventory"
+              style={{
+                textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: '#fff',
+                border: '1px solid rgba(255,255,255,.28)', background: 'rgba(255,255,255,.16)',
+                borderRadius: 14, padding: '9px 10px',
+                display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 'none',
+              }}
+            >
+              <Thumb url={data.topProducts[0].imageUrl} size={34} />
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                <span
+                  style={{
+                    fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em',
+                    textTransform: 'uppercase', color: 'rgba(255,255,255,.72)',
+                  }}
+                >
+                  Bought most
+                </span>
+                <span
+                  style={{
+                    fontSize: 11.5, fontWeight: 700, lineHeight: 1.3,
+                    whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                  }}
+                >
+                  {data.topProducts[0].title}
+                </span>
+                <span className="mono" style={{ fontSize: 10.5, color: 'rgba(255,255,255,.78)' }}>
+                  {data.topProducts[0].units}× · {data.topProducts[0].spend}
+                </span>
+              </span>
+            </button>
+          )}
 
           <div
             style={{
@@ -601,4 +618,80 @@ function buildAttention(
   }
 
   return items
+}
+
+/**
+ * The articles bought most often.
+ *
+ * Inventory is one row per unit, which answers "what do I hold" but never
+ * "what do I keep buying". This does, in the order that matters: most units
+ * first, with what they have cost.
+ */
+function MostBought({
+  products,
+  onGo,
+}: {
+  products: DashboardView['topProducts']
+  onGo: (screen: 'Inventory' | 'Shipments' | 'Purchases' | 'Settings') => void
+}) {
+  if (products.length === 0) {
+    return (
+      <div style={{ fontSize: 11.5, color: 'var(--text-ghost)', lineHeight: 1.5 }}>
+        Nothing bought yet. Every article an order brings in is counted here.
+      </div>
+    )
+  }
+
+  const most = products[0]!.units
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 7, minHeight: 0, overflow: 'auto' }}>
+      {products.map((product) => (
+        <button
+          key={product.title}
+          onClick={() => onGo('Inventory')}
+          title={`${product.title} · ${product.units} bought · ${product.spend}`}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 9, minWidth: 0, textAlign: 'left',
+            border: 0, background: 'transparent', padding: 0, cursor: 'pointer',
+            fontFamily: 'inherit', color: 'inherit',
+          }}
+        >
+          <Thumb url={product.imageUrl} size={26} />
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+            <span
+              style={{
+                fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              {product.title}
+            </span>
+            {/* A bar against the biggest, so the shape of the position reads
+                without doing the arithmetic. */}
+            <span
+              style={{
+                display: 'block', height: 3, borderRadius: 2, background: '#1c2330', overflow: 'hidden',
+              }}
+            >
+              <span
+                style={{
+                  display: 'block', height: '100%', background: 'var(--accent)',
+                  width: `${Math.max(6, Math.round((product.units / most) * 100))}%`,
+                }}
+              />
+            </span>
+          </span>
+          <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 1 }}>
+            <span className="mono" style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text)' }}>
+              {product.units}×
+            </span>
+            <span className="mono" style={{ fontSize: 10, color: 'var(--text-dimmer)' }}>
+              {product.spend}
+            </span>
+          </span>
+        </button>
+      ))}
+    </div>
+  )
 }

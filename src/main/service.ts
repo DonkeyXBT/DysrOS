@@ -139,6 +139,7 @@ export class AppService {
     this.mailbox = new MailboxSync(this.db)
     this.ensureLocalAccount()
     this.rebuildIfSchemaMoved()
+    this.repairUnlinkedSales()
   }
 
   /**
@@ -356,6 +357,45 @@ export class AppService {
     this.restoreRedirects(redirects)
     this.restoreSales(sales)
     return result
+  }
+
+  /**
+   * Reconnects sales that lost the unit they sold.
+   *
+   * Before this was fixed, re-reading mail deleted the items and left every
+   * hand-made sale pointing at nothing: the units went back into stock and
+   * their money counted as profit with no cost against it. The sale's identity
+   * is derived from the unit and the date it was sold, so the pairing can be
+   * worked out again rather than being lost — which matters, because a sale is
+   * something a person recorded and nothing else can re-derive it.
+   */
+  private repairUnlinkedSales(): void {
+    const orphans = this.db.prepare(
+      "SELECT id, sold_at FROM sales WHERE item_id IS NULL AND marketplace = 'offline'",
+    ).all() as { id: string; sold_at: string }[]
+    if (orphans.length === 0) return
+
+    const items = this.db.prepare('SELECT id FROM items').all() as { id: string }[]
+    const claimed = new Set(
+      (this.db.prepare('SELECT item_id FROM sales WHERE item_id IS NOT NULL').all() as
+        { item_id: string }[]).map((row) => row.item_id),
+    )
+
+    let repaired = 0
+    for (const orphan of orphans) {
+      const match = items.find(
+        (item) => !claimed.has(item.id) && saleKey(item.id, orphan.sold_at) === orphan.id,
+      )
+      if (!match) continue
+      this.db.prepare('UPDATE sales SET item_id = ? WHERE id = ?').run(match.id, orphan.id)
+      this.db.prepare("UPDATE items SET status = 'sold' WHERE id = ?").run(match.id)
+      claimed.add(match.id)
+      repaired += 1
+    }
+
+    if (repaired > 0) {
+      this.setSetting('sales_repaired_at', new Date().toISOString())
+    }
   }
 
   /**
@@ -1547,6 +1587,25 @@ export class AppService {
       )),
     }))
 
+    // --- What is bought most often ----------------------------------------
+    // Grouped on the visible title with spacing and case ignored: the same
+    // product arrives worded identically from a retailer but not always spaced
+    // identically, and one row per spelling would answer nothing.
+    const topProducts = this.db.prepare(
+      `SELECT trim(replace(replace(title, char(10), ' '), '  ', ' ')) AS title,
+              COUNT(*) AS units,
+              SUM(cost_minor) AS spend,
+              MAX(purchased_at) AS last_bought,
+              MAX(image_url) AS image_url
+       FROM items
+       GROUP BY lower(trim(replace(replace(title, char(10), ' '), '  ', ' ')))
+       ORDER BY units DESC, spend DESC
+       LIMIT 6`,
+    ).all() as {
+      title: string; units: number; spend: number
+      last_bought: string | null; image_url: string | null
+    }[]
+
     // --- Profit: only real once a sale exists ------------------------------
     const revenue = sum('SELECT SUM(payout_minor) AS total FROM sales')
     const fees = sum('SELECT SUM(fees_minor) AS total FROM sales')
@@ -1669,6 +1728,14 @@ export class AppService {
         owed: formatMoney(money(owed, 'EUR')),
         owedMinor: owed,
       },
+      topProducts: topProducts.map((product) => ({
+        title: product.title,
+        units: product.units,
+        spend: formatMoney(money(product.spend, 'EUR')),
+        spendMinor: product.spend,
+        lastBoughtAt: product.last_bought,
+        imageUrl: product.image_url,
+      })),
       profit: {
         net: formatMoney(money(netProfit, 'EUR')),
         netMinor: netProfit,
@@ -2202,6 +2269,15 @@ export interface DashboardView {
   inFlight: { units: number; parcels: number; awaitingCode: number }
   stock: { units: number; capital: string; capitalMinor: number }
   cancelled: { units: number; owed: string; owedMinor: number }
+  /** The articles bought most often, most units first. */
+  topProducts: {
+    title: string
+    units: number
+    spend: string
+    spendMinor: number
+    lastBoughtAt: string | null
+    imageUrl: string | null
+  }[]
   profit: {
     net: string
     netMinor: number
