@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { api, type ShipmentView } from '../api.js'
 import { Pager, usePaged } from '../Pager.js'
 import { SkeletonTable } from '../Skeleton.js'
+import { ContextMenu, useContextMenu } from '../ContextMenu.js'
+import { Confirm } from '../Confirm.js'
 
 const GRID = 'grid-template-columns:70px 110px 170px minmax(160px,1fr) 130px 100px 96px'
 
@@ -38,9 +40,14 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   const [resolving, setResolving] = useState(false)
   const [resolveNote, setResolveNote] = useState<string | null>(null)
 
-  useEffect(() => {
+  const [confirming, setConfirming] = useState<ShipmentView | null>(null)
+  const { menu, open, close } = useContextMenu()
+
+  const load = () => {
     void api.shipments().then(setShipments)
-  }, [dataVersion])
+  }
+
+  useEffect(load, [dataVersion])
 
   const term = query.trim().toLowerCase()
   const rows = (shipments ?? []).filter(
@@ -73,7 +80,31 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   }
 
   return (
-    <div style={{ display: 'flex', gap: 13, alignItems: 'flex-start' }}>
+    <div className="screen" style={{ flexDirection: 'row', gap: 13, alignItems: 'stretch' }}>
+      <ContextMenu menu={menu} onClose={close} />
+
+      {confirming && (
+        <Confirm
+          title="Delete shipment"
+          destructive
+          confirmLabel="Delete"
+          onCancel={() => setConfirming(null)}
+          onConfirm={async () => {
+            const target = confirming
+            setConfirming(null)
+            await api.deleteRecord('shipment', target.id)
+            setSelected(null)
+            load()
+          }}
+          body={
+            <>
+              Remove this <strong>{confirming.carrier.toUpperCase()}</strong> parcel? The order it
+              belongs to stays, and re-reading mail will not bring the parcel back.
+            </>
+          }
+        />
+      )}
+
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 11 }}>
         {awaiting.length > 0 && (
           <div
@@ -150,6 +181,7 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
               <div>Dir</div><div>Carrier</div><div>Tracking</div><div>Contents</div>
               <div>Status</div><div>Expected</div><div>Postcode</div>
             </div>
+            <div className="table-scroll-y">
             {paged.visible.map((shipment) => {
               const mark = CARRIER_MARK[shipment.carrier] ?? { abbr: '??', color: '#8d94a6' }
               return (
@@ -158,6 +190,25 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                   className="trow"
                   style={{ minWidth: 880, ...gridStyle() }}
                   onClick={() => setSelected(shipment)}
+                  onContextMenu={(event) =>
+                    open(event, shipment.title ?? shipment.linked, [
+                      {
+                        label: 'Copy tracking code',
+                        disabled: !shipment.trackingNumber,
+                        onSelect: () =>
+                          void navigator.clipboard.writeText(shipment.trackingNumber ?? ''),
+                      },
+                      {
+                        label: 'Open tracking link',
+                        disabled: !shipment.trackingUrl,
+                        onSelect: () => void api.openExternal(shipment.trackingUrl!),
+                      },
+                      {
+                        label: 'Delete shipment',
+                        destructive: true,
+                        onSelect: () => setConfirming(shipment),
+                      },
+                    ])}
                 >
                   <div>
                     <span
@@ -235,6 +286,7 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                 </div>
               )
             })}
+            </div>
           </div>
         </div>
         <Pager

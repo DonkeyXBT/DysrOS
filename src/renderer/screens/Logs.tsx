@@ -48,7 +48,7 @@ export function Logs() {
   if (!entries) return <SkeletonCards count={6} height={54} />
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 11 }}>
+    <div className="screen" style={{ overflowY: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
         {(['all', 'error', 'warn'] as const).map((level) => (
           <button

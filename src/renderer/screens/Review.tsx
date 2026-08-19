@@ -36,7 +36,7 @@ export function Review({ dataVersion }: { dataVersion: number }) {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 11, maxWidth: 960 }}>
+    <div className="screen" style={{ overflowY: 'auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <span style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.5 }}>
           No parser recognised these. Export one and a parser can be written for it.

@@ -142,6 +142,21 @@ function scheduleRescan(): void {
   }, 400)
 }
 
+/** The size the design was drawn at. */
+const DESIGN_WIDTH = 1440
+const DESIGN_HEIGHT = 900
+/** Below this the text stops being readable; above it, panels just look empty. */
+const MIN_SCALE = 0.62
+const MAX_SCALE = 1.25
+
+function applyScale(): void {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const [width = DESIGN_WIDTH, height = DESIGN_HEIGHT] = mainWindow.getContentSize()
+  const scale = Math.min(width / DESIGN_WIDTH, height / DESIGN_HEIGHT)
+  const clamped = Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale))
+  mainWindow.webContents.setZoomFactor(Number(clamped.toFixed(3)))
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -159,7 +174,20 @@ function createWindow(): void {
     },
   })
 
-  mainWindow.once('ready-to-show', () => mainWindow?.show())
+  mainWindow.once('ready-to-show', () => {
+    applyScale()
+    mainWindow?.show()
+  })
+
+  // Scale the whole interface with the window rather than reflowing it.
+  //
+  // The design is laid out at 1440x900 and is dense: at a smaller window,
+  // reflowing would push content below the fold and force scrolling through the
+  // chrome. Scaling keeps every panel in view at any size, and text shrinks
+  // with the panels so proportions stay exactly as designed.
+  mainWindow.on('resize', applyScale)
+  mainWindow.on('maximize', applyScale)
+  mainWindow.on('unmaximize', applyScale)
 
   // The title bar's maximise button has two icons, so the renderer needs to
   // know which state the window is actually in — including when the user
@@ -415,6 +443,12 @@ app.whenReady().then(() => {
       saved += 1
     }
     return { saved, folder: picked.filePaths[0] }
+  })
+
+  handle('delete-record', (kind: 'item' | 'purchase' | 'shipment' | 'sale', id: string) => {
+    const result = service.deleteRecord(kind, id)
+    mainWindow?.webContents.send('mail-updated', { deleted: kind })
+    return result
   })
 
   handle('discord-settings', () => service.discordSettings())

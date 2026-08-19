@@ -51,8 +51,13 @@ export function Dashboard({
   const attention = buildAttention(data, onGo)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-      <section style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 10, alignItems: 'stretch' }}>
+    <div className="screen" style={{ gap: 10, overflowY: 'auto' }}>
+      <section
+        style={{
+          display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 10,
+          alignItems: 'stretch', flex: '1 1 40%', minHeight: 250,
+        }}
+      >
         <Card title="Pipeline" note="units through each stage">
           <Pipeline funnel={data.funnel} />
         </Card>
@@ -64,7 +69,8 @@ export function Dashboard({
 
       <section
         style={{
-          display: 'grid', gridTemplateColumns: '1fr 1.25fr 1fr', gap: 10, alignItems: 'stretch',
+          display: 'grid', gridTemplateColumns: '1fr 1.25fr 1fr', gap: 10,
+          alignItems: 'stretch', flex: '1 1 46%', minHeight: 300,
         }}
       >
         <Card title="Capital tied up">

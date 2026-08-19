@@ -152,6 +152,10 @@ interface Api {
   deleteAllData(includeAccounts: boolean): Promise<{
     deleted: boolean; messages?: number; events?: number; purchases?: number; items?: number
   }>
+  deleteRecord(
+    kind: 'item' | 'purchase' | 'shipment' | 'sale',
+    id: string,
+  ): Promise<{ deleted: boolean }>
   discordSettings(): Promise<DiscordSettingsView>
   discordSetWebhook(url: string): Promise<{ ok: boolean; message: string }>
   discordSetRule(event: string, enabled: boolean): Promise<boolean>

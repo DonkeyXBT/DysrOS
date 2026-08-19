@@ -28,7 +28,7 @@ export function Settings({
   const [confirming, setConfirming] = useState(false)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 13, maxWidth: 920 }}>
+    <div className="screen" style={{ gap: 13, maxWidth: 920, overflowY: 'auto' }}>
       {confirming && (
         <Confirm
           title="Delete all data"

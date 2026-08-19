@@ -799,6 +799,57 @@ export class AppService {
     return { attempted: rows.length, resolved, failed }
   }
 
+  /**
+   * Removes one record by hand.
+   *
+   * The event that produced it is marked as ignored rather than deleted, so a
+   * later re-parse does not quietly bring back something deliberately removed —
+   * which would make manual deletion feel broken rather than final.
+   */
+  deleteRecord(kind: 'item' | 'purchase' | 'shipment' | 'sale', id: string): { deleted: boolean } {
+    const remove = this.db.transaction(() => {
+      if (kind === 'item') {
+        this.db.prepare('DELETE FROM items WHERE id = ?').run(id)
+        return
+      }
+      if (kind === 'purchase') {
+        // Its units and refunds go with it; keeping them would leave stock
+        // belonging to an order that no longer exists.
+        this.db.prepare('DELETE FROM items WHERE purchase_id = ?').run(id)
+        this.db.prepare('DELETE FROM refunds WHERE purchase_id = ?').run(id)
+        this.db.prepare('UPDATE shipments SET purchase_id = NULL WHERE purchase_id = ?').run(id)
+        this.suppressPurchase(id)
+        this.db.prepare('DELETE FROM purchases WHERE id = ?').run(id)
+        return
+      }
+      if (kind === 'shipment') {
+        this.suppress('shipment', id)
+        this.db.prepare('DELETE FROM shipments WHERE id = ?').run(id)
+        return
+      }
+      this.db.prepare('DELETE FROM sales WHERE id = ?').run(id)
+    })
+    remove()
+    return { deleted: true }
+  }
+
+  private suppress(kind: string, key: string): void {
+    this.db.prepare(
+      `INSERT INTO suppressions (kind, key, created_at) VALUES (?, ?, ?)
+       ON CONFLICT(kind, key) DO NOTHING`,
+    ).run(kind, key, new Date().toISOString())
+  }
+
+  /** Remembers the order itself, not the events that produced it, so a later
+   *  re-read cannot bring it back. */
+  private suppressPurchase(id: string): void {
+    const row = this.db
+      .prepare('SELECT retailer, external_order_id FROM purchases WHERE id = ?')
+      .get(id) as { retailer: string; external_order_id: string | null } | undefined
+    if (!row?.external_order_id) return
+    this.suppress('purchase', `${row.retailer}|${row.external_order_id}`)
+  }
+
   // ---- Discord notifications ----------------------------------------------
 
   setDiscordWebhook(url: string): { ok: boolean; message: string } {
