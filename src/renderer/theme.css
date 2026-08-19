@@ -94,17 +94,25 @@ a:hover { color: var(--accent-bright); }
 
 /* The sidebar has no surface of its own: the nav items are the surface, and
    they sit vertically centred against the window background. */
+/* The navigation sits centred; the account is pinned to the foot of the rail. */
 .sidebar {
   width: 214px;
   flex: none;
   display: flex;
   flex-direction: column;
-  justify-content: center;
   gap: 4px;
-  padding: 0 0 12%;
   background: transparent;
   border: 0;
   min-height: 0;
+  overflow: hidden;
+}
+.sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -592,3 +600,65 @@ a:hover { color: var(--accent-bright); }
 .ctx-item:disabled { color: var(--text-ghost); cursor: default; }
 .ctx-item-destructive { color: var(--pink); }
 .ctx-item-destructive:hover:not(:disabled) { background: rgba(232, 56, 111, .14); color: #ff8fb0; }
+
+/* Toasts and the account chip --------------------------------------------- */
+
+@keyframes toastIn {
+  from { opacity: 0; transform: translateY(8px) }
+  to   { opacity: 1; transform: none }
+}
+
+.toast-stack {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 80;
+  /* Passing notices must never intercept a click meant for the page. */
+  pointer-events: none;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 320px;
+  padding: 10px 13px;
+  background: var(--panel);
+  border: 1px solid var(--border-input);
+  border-radius: 14px;
+  box-shadow: 0 18px 44px rgba(0, 0, 0, .55);
+  animation: toastIn .18s ease-out;
+}
+.toast-dot { width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; flex: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
+/* The account sits at the foot of the navigation, not in the page header. */
+.account-chip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  flex: none;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--panel);
+  color: inherit;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+.account-chip:hover { background: #1b2130; }
+.account-avatar {
+  width: 28px; height: 28px; border-radius: 50%; flex: none;
+  background: var(--grad-warm);
+  display: flex; align-items: center; justify-content: center;
+  color: #1a1d26; font-weight: 800; font-size: 11px;
+}

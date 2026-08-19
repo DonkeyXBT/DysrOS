@@ -1224,6 +1224,17 @@ export class AppService {
         orders: count("SELECT COUNT(*) AS n FROM purchases WHERE status != 'cancelled'"),
         units: count('SELECT COUNT(*) AS n FROM items'),
         spend: formatMoney(money(sum('SELECT SUM(total_minor) AS total FROM purchases'), 'EUR')),
+        // Of the orders being watched, how many have actually left the retailer.
+        shipped: count(
+          `SELECT COUNT(DISTINCT p.id) AS n FROM purchases p
+           JOIN shipments s ON s.purchase_id = p.id
+           WHERE p.status != 'cancelled'`,
+        ),
+        delivered: count(
+          `SELECT COUNT(DISTINCT p.id) AS n FROM purchases p
+           JOIN shipments s ON s.purchase_id = p.id
+           WHERE p.status != 'cancelled' AND s.status = 'delivered'`,
+        ),
       },
       inFlight: {
         units: count("SELECT COUNT(*) AS n FROM items WHERE status = 'incoming'"),
@@ -1435,7 +1446,7 @@ export interface AycdStatusView {
 }
 
 export interface DashboardView {
-  bought: { orders: number; units: number; spend: string }
+  bought: { orders: number; units: number; spend: string; shipped: number; delivered: number }
   inFlight: { units: number; parcels: number; awaitingCode: number }
   stock: { units: number; capital: string; capitalMinor: number }
   cancelled: { units: number; owed: string; owedMinor: number }

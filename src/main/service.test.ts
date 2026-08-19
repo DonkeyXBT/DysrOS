@@ -717,3 +717,30 @@ describe.skipIf(!allPresent)('deleting records by hand', () => {
     expect(service.listInventory()).toHaveLength(4)
   })
 })
+
+describe.skipIf(!allPresent)('watching orders through to shipment', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('reports how many of the orders being watched have shipped', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    // These shipping mails reference orders whose confirmations were never
+    // supplied, so none of the known orders can claim to have shipped.
+    expect(dashboard.bought.orders).toBe(2)
+    expect(dashboard.bought.shipped).toBe(0)
+  })
+
+  it('counts an order once however many parcels it has', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    expect(dashboard.bought.shipped).toBeLessThanOrEqual(dashboard.bought.orders)
+  })
+
+  it('counts delivered separately from shipped', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    expect(dashboard.bought.delivered).toBeLessThanOrEqual(dashboard.bought.shipped)
+  })
+})

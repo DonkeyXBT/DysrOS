@@ -7,7 +7,7 @@ export interface ShipmentView {
   linkedToPurchase: boolean
 }
 export interface DashboardView {
-  bought: { orders: number; units: number; spend: string }
+  bought: { orders: number; units: number; spend: string; shipped: number; delivered: number }
   inFlight: { units: number; parcels: number; awaitingCode: number }
   stock: { units: number; capital: string; capitalMinor: number }
   cancelled: { units: number; owed: string; owedMinor: number }
@@ -176,6 +176,7 @@ interface Api {
   downloadUpdate(): Promise<{ started: boolean }>
   installUpdate(): Promise<void>
   onUpdateProgress(handler: (p: { percent: number; bytesPerSecond: number }) => void): () => void
+  onUpdateAvailable(handler: (info: { version: string }) => void): () => void
   onUpdateDownloaded(handler: (info: { version: string }) => void): () => void
   mailDir(): Promise<string>
   rescan(): Promise<{ scanned: number; recognised: number; unrecognised: number }>

@@ -51,11 +51,11 @@ export function Dashboard({
   const attention = buildAttention(data, onGo)
 
   return (
-    <div className="screen" style={{ gap: 10, overflowY: 'auto' }}>
+    <div className="screen" style={{ gap: 10 }}>
       <section
         style={{
           display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 10,
-          alignItems: 'stretch', flex: '1 1 40%', minHeight: 250,
+          alignItems: 'stretch', flex: '1 1 44%', minHeight: 0,
         }}
       >
         <Card title="Pipeline" note="units through each stage">
@@ -70,7 +70,7 @@ export function Dashboard({
       <section
         style={{
           display: 'grid', gridTemplateColumns: '1fr 1.25fr 1fr', gap: 10,
-          alignItems: 'stretch', flex: '1 1 46%', minHeight: 300,
+          alignItems: 'stretch', flex: '1 1 56%', minHeight: 0,
         }}
       >
         <Card title="Capital tied up">
@@ -83,11 +83,15 @@ export function Dashboard({
           }}
         >
           <Kpi
-            label="On the way"
-            value={String(data.inFlight.units)}
-            meta={`${data.inFlight.parcels} parcel${data.inFlight.parcels === 1 ? '' : 's'} moving`}
+            label="Shipped"
+            value={`${data.bought.shipped}/${data.bought.orders}`}
+            meta={
+              data.bought.delivered > 0
+                ? `${data.bought.delivered} delivered · ${data.bought.orders - data.bought.shipped} not yet sent`
+                : `${data.bought.orders - data.bought.shipped} order${data.bought.orders - data.bought.shipped === 1 ? '' : 's'} not yet sent`
+            }
             hue={40}
-            fill={data.bought.units === 0 ? 0 : data.inFlight.units / data.bought.units}
+            fill={data.bought.orders === 0 ? 0 : data.bought.shipped / data.bought.orders}
             onClick={() => onGo('Shipments')}
           />
           <Kpi
@@ -178,24 +182,6 @@ export function Dashboard({
         </div>
       </section>
 
-      <section className="section" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-          <h2>Money out and in</h2>
-          <span className="section-note">last 12 weeks</span>
-          <div style={{ display: 'flex', gap: 18, marginLeft: 'auto', alignItems: 'baseline' }}>
-            <Legend colour="var(--warm)" label="Spent" value={data.money.out} />
-            <Legend colour="var(--teal)" label="Received" value={data.money.in} />
-          </div>
-        </div>
-        <MoneyChart series={data.series} />
-        {data.money.salesRecorded === 0 && (
-          <div style={{ fontSize: 11.5, color: 'var(--text-ghost)', lineHeight: 1.5 }}>
-            Received counts refunds that have actually arrived, and marketplace payouts. No sales
-            channel is connected yet, so it reflects refunds only — money owed back from
-            cancellations is shown as owed rather than counted as received.
-          </div>
-        )}
-      </section>
     </div>
   )
 }
