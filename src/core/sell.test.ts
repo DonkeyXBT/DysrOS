@@ -63,15 +63,15 @@ describe('breaking down a private sale', () => {
     expect(sale.vatMinor).toBe(1302)
   })
 
-  it('counts profit net against net, not gross against gross', () => {
+  it('counts profit as what was received less what was paid', () => {
     const sale = breakDownSale({ lines: [unit], amountMinor: 7500, includesVat: true })
 
-    // Cost 5399 gross is 937 VAT and 4462 net. Profit is 6198 - 4462.
+    expect(sale.profitMinor).toBe(7500 - 5399)
+    // The VAT on both sides is still worked out, for the return, but it is not
+    // taken out of the profit.
     expect(sale.lines[0]!.costVatMinor).toBe(937)
     expect(sale.lines[0]!.costNetMinor).toBe(4462)
-    expect(sale.profitMinor).toBe(1736)
-    // Not the naive 7500 - 5399, which would count the tax office's money.
-    expect(sale.profitMinor).not.toBe(2101)
+    expect(sale.vatMinor).toBe(1302)
   })
 
   it('reports a loss as a loss', () => {

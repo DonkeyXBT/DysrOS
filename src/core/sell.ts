@@ -10,10 +10,10 @@ import { vatFromGross, vatFromNet } from './vat.js'
  * would have.
  *
  * Dutch VAT is 21%, and retailer mail states prices with VAT already in them,
- * so cost is treated as gross throughout. Profit is then net against net: VAT
- * collected on a sale is not income, it is money held for the tax office, and
- * VAT paid on a purchase comes back, so counting either as profit would
- * overstate every position.
+ * so cost is treated as gross throughout. Profit is what was received less
+ * what was paid — the figure a reseller actually thinks in. The VAT on each
+ * side is worked out too and kept beside it, because that is what a return
+ * needs, but it is not netted out of the profit.
  */
 
 /** The Dutch standard rate, in basis points. */
@@ -36,7 +36,7 @@ export interface SaleLine {
   /** VAT already paid on buying it, which comes back. */
   costVatMinor: number
   costNetMinor: number
-  /** Net revenue less net cost: the figure that is really earned. */
+  /** What it sold for less what it cost. */
   profitMinor: number
 }
 
@@ -116,7 +116,7 @@ export function breakDownSale(input: SaleInput): SaleBreakdown {
       netMinor: sale.net.minor,
       costVatMinor: cost.vat.minor,
       costNetMinor: cost.net.minor,
-      profitMinor: sale.net.minor - cost.net.minor,
+      profitMinor: sale.gross.minor - line.costMinor,
     }
   })
 

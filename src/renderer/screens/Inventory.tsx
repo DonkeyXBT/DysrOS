@@ -10,8 +10,8 @@ import { SellDialog } from '../Sell.js'
 
 /** The design's column set: selection, thumbnail, then the item's facts. */
 const COLUMNS =
-  '26px 34px minmax(180px,2fr) 78px 52px 104px 88px 74px 84px 88px 88px 54px 92px 80px'
-const MIN_WIDTH = 1320
+  '26px 34px minmax(220px,2fr) 104px 96px 74px 84px 88px 88px 52px 96px'
+const MIN_WIDTH = 1010
 
 const STATUS: Record<string, { label: string; hue: number; muted?: boolean }> = {
   incoming: { label: 'Incoming', hue: 285 },
@@ -30,14 +30,18 @@ function statusColour(status: string): string {
   return entry.muted ? 'oklch(0.60 0.015 265)' : `oklch(0.76 0.13 ${entry.hue})`
 }
 
-type SortKey =
-  | 'title' | 'brand' | 'size' | 'status' | 'purchasedAt' | 'cost' | 'profit'
-  | 'daysHeld' | 'retailer'
+type SortKey = 'title' | 'status' | 'purchasedAt' | 'cost' | 'profit' | 'daysHeld'
 
+/**
+ * The columns worth the width they take.
+ *
+ * Brand and size are never filled — no retailer mail states them — and a
+ * column of dashes costs the same width as one with something in it. The
+ * retailer sits under the item beside its order reference, where it reads as
+ * part of the item rather than as a fact of its own.
+ */
 const HEADERS: { key: SortKey | null; label: string; right?: boolean }[] = [
   { key: 'title', label: 'Item' },
-  { key: 'brand', label: 'Brand' },
-  { key: 'size', label: 'Size' },
   { key: 'status', label: 'Status' },
   { key: null, label: 'Parcel' },
   { key: 'purchasedAt', label: 'Bought' },
@@ -46,7 +50,6 @@ const HEADERS: { key: SortKey | null; label: string; right?: boolean }[] = [
   { key: 'profit', label: 'Profit', right: true },
   { key: 'daysHeld', label: 'Days', right: true },
   { key: null, label: 'Buyer' },
-  { key: 'retailer', label: 'Retailer' },
 ]
 
 export function Inventory({
@@ -99,9 +102,6 @@ export function Inventory({
           case 'profit': return item.profitMinor ?? Number.NEGATIVE_INFINITY
           case 'daysHeld': return item.daysHeld ?? -1
           case 'purchasedAt': return item.purchasedAt ?? ''
-          case 'brand': return item.brand ?? ''
-          case 'size': return item.size ?? ''
-          case 'retailer': return item.retailer ?? ''
           case 'status': return item.status
           default: return item.title.toLowerCase()
         }
@@ -354,12 +354,9 @@ export function Inventory({
                       {item.title}
                     </div>
                     <div className="mono" style={{ fontSize: 10, color: 'var(--text-faint)' }}>
-                      {item.orderRef ?? '—'}
+                      {[item.retailer, item.orderRef].filter(Boolean).join(' · ') || '—'}
                     </div>
                   </div>
-
-                  <Cell>{item.brand ?? '—'}</Cell>
-                  <Cell mono>{item.size ?? '—'}</Cell>
 
                   <div>
                     <span
@@ -419,7 +416,6 @@ export function Inventory({
                   </div>
                   <Cell mono right>{item.daysHeld ?? '—'}</Cell>
                   <Cell>{item.buyer ?? item.location ?? '—'}</Cell>
-                  <Cell>{item.retailer ?? '—'}</Cell>
                 </div>
               )
             })}
