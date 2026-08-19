@@ -90,6 +90,31 @@ async function sweepTracking(reason: string): Promise<void> {
   }
 }
 
+/**
+ * Sends what has happened to Discord.
+ *
+ * Every route that changes something ends here — a sync, a re-read, mail
+ * dropped into the folder — because the question the user asks is "did I get
+ * told", not "which code path noticed".
+ */
+async function announce(reason: string): Promise<void> {
+  try {
+    const result = await service.flushNotifications()
+    if (result.sent > 0) {
+      log.record('info', 'discord', `${reason}: sent ${result.sent} notification(s)`)
+      activity.start('discord', 'Discord', `sent ${result.sent} notification(s)`)
+      activity.finish('discord', `sent ${result.sent} notification(s)`)
+    }
+    if (result.failed > 0) {
+      log.record('warn', 'discord', new Error(`${result.failed} notification(s) not accepted`))
+      activity.start('discord', 'Discord', 'not accepted')
+      activity.finish('discord', `${result.failed} not accepted — will try again`, false)
+    }
+  } catch (error) {
+    log.record('warn', 'discord', error)
+  }
+}
+
 /** Queues the next sync, then keeps queueing after each one finishes. */
 function scheduleNextSync(): void {
   if (syncTimer) clearTimeout(syncTimer)
@@ -151,6 +176,10 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
     // lookup happens here rather than during parsing.
     await sweepTracking('after sync')
 
+    // Only now is a parcel's story complete enough to tell: the barcode it was
+    // waiting for is either resolved or not.
+    await announce('after sync')
+
     return result
   } catch (error) {
     const entry = log.record('error', 'sync', error)
@@ -186,8 +215,11 @@ function defaultMailDir(): string {
 function scheduleRescan(): void {
   if (rescanTimer) clearTimeout(rescanTimer)
   rescanTimer = setTimeout(() => {
-    void service.scanMailDir(mailDir).then((result) => {
-      if (result.scanned > 0) mainWindow?.webContents.send('mail-updated', result)
+    void service.scanMailDir(mailDir).then(async (result) => {
+      if (result.scanned > 0) {
+        mainWindow?.webContents.send('mail-updated', result)
+        await announce('after a folder scan')
+      }
     })
   }, 400)
 }
@@ -333,6 +365,7 @@ app.whenReady().then(() => {
       // straight away pairs them back up rather than leaving the list doubled
       // until the next sweep comes round.
       await sweepTracking('after re-reading')
+      await announce('after re-reading')
     }).catch((error: unknown) => {
       log?.record('error', 'reparse', error)
       activity.finish('reparse', 'could not re-read stored mail', false)
