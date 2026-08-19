@@ -18,53 +18,106 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
 ::-webkit-scrollbar-thumb{background:#272d3a;border-radius:8px;border:3px solid transparent;background-clip:padding-box}
 ::-webkit-scrollbar-track{background:transparent}
 @keyframes pulseGlow{0%,100%{opacity:.5}50%{opacity:1}}
+@keyframes toastIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
 @keyframes shim{0%{opacity:.35}50%{opacity:.7}100%{opacity:.35}}
 </style>
 </helmet>
-<div style="display:flex;height:100vh;width:100%;overflow:hidden;background:#0b0d12;padding:14px;gap:14px">
+<div style="display:flex;flex-direction:column;height:100vh;width:100%;overflow:hidden;background:#0b0d12">
+ <div style="flex:none;display:flex;align-items:center;gap:12px;height:38px;padding:0 8px 0 16px;-webkit-app-region:drag;user-select:none">
+   <span style="font-size:11.5px;font-weight:600;color:#6f7789;letter-spacing:.01em">{{ screenTitle }}</span>
+   <div style="flex:1"></div>
+   <div style="display:flex;align-items:center;gap:6px;-webkit-app-region:no-drag;margin-right:6px">
+     <sc-if value="{{ updateAvailable }}" hint-placeholder-val="{{ true }}">
+       <button onClick="{{ openUpdater }}" style="display:flex;align-items:center;gap:7px;border:1px solid #2b3a5e;background:rgba(91,140,255,.12);border-radius:999px;padding:5px 11px;cursor:pointer;font-family:inherit" style-hover="background:rgba(91,140,255,.22)">
+         <span style="width:6px;height:6px;border-radius:50%;background:#5b8cff;flex:none;animation:pulseGlow 2s ease-in-out infinite"></span>
+         <span style="font-size:11px;font-weight:700;color:#b9cdff">Update available</span>
+         <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#7a8296">v2.4.0</span>
+       </button>
+     </sc-if>
+     <button onClick="{{ triggerSync }}" style="display:flex;align-items:center;gap:7px;border:1px solid #232a38;background:#141824;border-radius:999px;padding:5px 11px;cursor:pointer;font-family:inherit" style-hover="border-color:#2b3346">
+       <span style="{{ sync.dot }}"></span>
+       <span style="font-size:11px;font-weight:700;color:#c9d0e0">{{ sync.title }}</span>
+       <span style="font-size:10.5px;color:#7a8296">{{ sync.detail }}</span>
+       <sc-if value="{{ sync.showBar }}" hint-placeholder-val="{{ false }}">
+         <span style="display:block;width:34px;height:3px;border-radius:3px;background:#232a38;overflow:hidden"><span style="{{ sync.barStyle }}"></span></span>
+       </sc-if>
+     </button>
+   </div>
+   <div style="position:relative;-webkit-app-region:no-drag;margin-right:4px">
+     <button onClick="{{ toggleAlerts }}" title="Notifications" style="width:34px;height:30px;border:0;border-radius:9px;background:transparent;color:#8d94a6;cursor:pointer;display:flex;align-items:center;justify-content:center;position:relative" style-hover="background:#1b2130;color:#e8eaf0">
+       <svg viewBox="0 0 16 16" style="width:15px;height:15px" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6.8a4 4 0 0 1 8 0c0 2.4.7 3.4 1.2 3.9H2.8C3.3 10.2 4 9.2 4 6.8M6.4 12.6a1.8 1.8 0 0 0 3.2 0"></path></svg>
+       <sc-if value="{{ alertDot }}" hint-placeholder-val="{{ false }}">
+         <span style="{{ alertDotStyle }}"></span>
+       </sc-if>
+     </button>
+     <sc-if value="{{ alertsOpen }}" hint-placeholder-val="{{ false }}">
+       <div style="position:absolute;top:36px;right:0;width:320px;background:#141824;border:1px solid #262d3d;border-radius:16px;box-shadow:0 22px 60px rgba(0,0,0,.6);z-index:70;overflow:hidden">
+         <div style="display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid #1f2532">
+           <span style="font-size:12px;font-weight:700">Notifications</span>
+           <button onClick="{{ markAllRead }}" style="margin-left:auto;border:0;background:transparent;color:#8fb0ff;font-size:11px;font-family:inherit;cursor:pointer">Mark all read</button>
+         </div>
+         <div style="max-height:260px;overflow:auto">
+           <sc-for list="{{ alerts }}" as="a" hint-placeholder-count="3">
+             <button onClick="{{ a.go }}" style="{{ a.style }}" style-hover="background:#181e2b">
+               <span style="{{ a.dot }}"></span>
+               <span style="display:flex;flex-direction:column;gap:2px;min-width:0;text-align:left">
+                 <span style="font-size:12px;font-weight:600;color:#d8dde8">{{ a.title }}</span>
+                 <span style="font-size:11px;color:#7a8296">{{ a.meta }}</span>
+               </span>
+               <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10px;color:#5f6779">{{ a.at }}</span>
+             </button>
+           </sc-for>
+         </div>
+       </div>
+     </sc-if>
+   </div>
+   <div style="display:flex;gap:2px;-webkit-app-region:no-drag">
+     <button onClick="{{ winMinimize }}" title="Minimize" style="width:40px;height:30px;border:0;border-radius:9px;background:transparent;color:#8d94a6;cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:#1b2130;color:#e8eaf0">
+       <span style="display:block;width:10px;height:1.5px;background:currentColor;border-radius:2px"></span>
+     </button>
+     <button onClick="{{ winMaximize }}" title="Maximize" style="width:40px;height:30px;border:0;border-radius:9px;background:transparent;color:#8d94a6;cursor:pointer;display:flex;align-items:center;justify-content:center" style-hover="background:#1b2130;color:#e8eaf0">
+       <span style="{{ maxIconStyle }}"></span>
+     </button>
+     <button onClick="{{ winClose }}" title="Close" style="width:40px;height:30px;border:0;border-radius:9px;background:transparent;color:#8d94a6;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1" style-hover="background:#e8386f;color:#fff">✕</button>
+   </div>
+ </div>
+ <sc-if value="{{ windowOpen }}" hint-placeholder-val="{{ true }}">
+ <div style="{{ shellStyle }}">
 
-  <aside style="width:214px;flex:none;display:flex;flex-direction:column;gap:3px;padding:16px 12px 12px;background:#141824;border:1px solid #1f2532;border-radius:22px;box-shadow:0 18px 50px rgba(0,0,0,.45)">
-    <div style="display:flex;align-items:center;gap:10px;padding:2px 8px 16px">
-      <div style="width:30px;height:30px;border-radius:11px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:14px;color:#0b0d12">R</div>
-      <div style="display:flex;flex-direction:column;gap:1px">
-        <div style="font-size:13px;font-weight:700;letter-spacing:-.01em">Resell Ops</div>
-        <div style="font-size:10.5px;color:#6f7789">local · one seat</div>
-      </div>
-    </div>
+  <aside style="width:214px;flex:none;display:flex;flex-direction:column;gap:4px;padding:0 0 2px;background:transparent;border:0;min-height:0;overflow-y:auto;overflow-x:hidden;justify-content:center;padding-bottom:12%">
     <sc-for list="{{ nav }}" as="n" hint-placeholder-count="8">
       <button onClick="{{ n.go }}" style="{{ n.style }}" style-hover="background:#1b2130">
-        <span style="display:flex;align-items:center;gap:10px"><span style="{{ n.dotStyle }}"></span><span>{{ n.label }}</span></span>
+        <span style="display:flex;align-items:center;gap:10px">
+          <svg viewBox="0 0 16 16" style="{{ n.iconStyle }}" fill="none" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round"><path d="{{ n.icon }}"></path></svg>
+          <span>{{ n.label }}</span>
+        </span>
         <sc-if value="{{ n.badge }}" hint-placeholder-val="{{ false }}">
           <span style="min-width:20px;height:19px;padding:0 6px;border-radius:7px;background:#ff6a9c;color:#170a12;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center;box-shadow:0 0 0 3px rgba(255,106,156,.14)">{{ n.badge }}</span>
         </sc-if>
       </button>
     </sc-for>
     <div style="flex:1"></div>
-    <button onClick="{{ triggerSync }}" style="text-align:left;width:100%;border:1px solid #232a38;background:#10141e;border-radius:16px;padding:11px 12px;cursor:pointer;color:inherit;font-family:inherit;display:flex;flex-direction:column;gap:6px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span style="{{ sync.dot }}"></span>
-        <span style="font-size:11.5px;font-weight:700;color:#c9d0e0">{{ sync.title }}</span>
-      </div>
-      <div style="font-size:10.5px;color:#7a8296;line-height:1.35">{{ sync.detail }}</div>
-      <sc-if value="{{ sync.showBar }}" hint-placeholder-val="{{ false }}">
-        <div style="height:3px;border-radius:3px;background:#232a38;overflow:hidden;width:100%"><div style="{{ sync.barStyle }}"></div></div>
-      </sc-if>
-    </button>
   </aside>
 
   <main style="flex:1;min-width:0;display:flex;flex-direction:column;overflow:hidden;background:#0f121a;border:1px solid #1c2230;border-radius:22px">
     <header style="flex:none;display:flex;align-items:center;gap:16px;padding:15px 20px;border-bottom:1px solid #1a2029">
-      <div style="display:flex;flex-direction:column;gap:2px;min-width:0">
-        <h1 style="margin:0;font-size:17px;font-weight:700;letter-spacing:-.02em">{{ screenTitle }}</h1>
-        <div style="font-size:11.5px;color:#6f7789">{{ screenSub }}</div>
-      </div>
+      <div style="width:34px;height:34px;flex:none;border-radius:50%;background:linear-gradient(140deg,#f7a08a,#e86aa0);display:flex;align-items:center;justify-content:center;color:#1a1d26;font-weight:800;font-size:12px">JV</div>
+      <sc-if value="{{ showDashboard }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;min-width:0">
+          <div style="display:flex;align-items:center;background:#141824;border:1px solid #232a38;border-radius:999px;padding:2px;flex:none">
+            <button onClick="{{ nextPeriod }}" style="border:0;background:#1f2635;color:#e8eaf0;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer">{{ d.periodLabel }} ⌄</button>
+            <span style="font-size:11.5px;color:#6f7789;padding:0 12px">compared to</span>
+            <button onClick="{{ nextPeriod }}" style="border:1px solid #2b3346;background:#10141e;color:#a9b1c2;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer">{{ d.prevLabel }} ⌄</button>
+          </div>
+          <button onClick="{{ toggleGranularity }}" style="flex:none;border:1px solid #232a38;background:#141824;color:#a9b1c2;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:600;font-family:inherit;cursor:pointer">{{ d.granularity }} ⌄</button>
+          <button style="flex:none;border:1px solid #2b3a5e;background:rgba(91,140,255,.12);color:#b9cdff;border-radius:999px;padding:7px 14px;font-size:11.5px;font-weight:700;font-family:inherit;cursor:pointer">Add widget +</button>
+        </div>
+      </sc-if>
       <div style="flex:1"></div>
       <div style="display:flex;align-items:center;gap:8px;background:#161b26;border:1px solid #232a38;border-radius:999px;padding:7px 13px;width:250px">
         <span style="width:11px;height:11px;border:1.5px solid #6f7789;border-radius:50%;flex:none"></span>
         <input value="{{ query }}" onChange="{{ onQuery }}" placeholder="Search title or SKU" style="border:0;background:transparent;outline:none;color:#e8eaf0;font-family:inherit;font-size:12.5px;width:100%"/>
       </div>
-      <button onClick="{{ cycleState }}" style="border:1px solid #232a38;background:#161b26;color:#8d94a6;border-radius:999px;padding:7px 13px;font-size:11.5px;font-family:inherit;cursor:pointer" style-hover="color:#e8eaf0">{{ stateLabel }}</button>
-      <div style="width:34px;height:34px;border-radius:50%;background:linear-gradient(140deg,#f7a08a,#e86aa0);display:flex;align-items:center;justify-content:center;color:#1a1d26;font-weight:800;font-size:12px">JV</div>
     </header>
 
     <sc-if value="{{ showStale }}" hint-placeholder-val="{{ false }}">
@@ -95,121 +148,121 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
       </sc-if>
 
       <sc-if value="{{ showDashboard }}" hint-placeholder-val="{{ true }}">
-        <div style="display:flex;flex-direction:column;gap:13px">
-          <sc-if value="{{ attentionFirst }}" hint-placeholder-val="{{ true }}">
-            <section style="border:1px solid #33262c;border-radius:20px;background:linear-gradient(135deg,rgba(232,106,160,.10),rgba(247,160,138,.03));padding:14px 16px">
-              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:11px">
-                <h2 style="margin:0;font-size:13px;font-weight:700">Needs you</h2>
-                <span style="font-size:11px;color:#8d94a6">4 things, oldest first</span>
+        <div style="display:flex;flex-direction:column;gap:10px;height:100%;min-height:0;overflow:auto">
+          <section style="display:grid;grid-template-columns:1.8fr 1fr;gap:10px;align-items:stretch;flex:1 1 44%;min-height:300px">
+            <div style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:14px 18px 12px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0">
+              <div style="display:flex;align-items:center;gap:10px">
+                <h2 style="margin:0;font-size:14px;font-weight:700">Pipeline</h2>
+                <span style="font-size:11px;color:#6f7789">{{ d.periodLabel }} · units through each stage</span>
+                <button style="margin-left:auto;width:26px;height:26px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#8d94a6;cursor:pointer;font-size:12px;line-height:1" style-hover="background:#1b2130;color:#e8eaf0">···</button>
               </div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px">
-                <sc-for list="{{ attention }}" as="a" hint-placeholder-count="4">
-                  <button onClick="{{ a.go }}" style="text-align:left;cursor:pointer;font-family:inherit;color:inherit;border:1px solid #2a3040;background:#151a26;border-radius:16px;padding:11px 12px;display:flex;flex-direction:column;gap:5px" style-hover="border-color:#3d4considered">
-                    <div style="display:flex;align-items:center;gap:7px">
-                      <span style="{{ a.dot }}"></span>
-                      <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#98a0b3">{{ a.kind }}</span>
+              <div style="display:flex;align-items:stretch;gap:1px;flex:1;min-height:120px">
+                <sc-for list="{{ d.funnel }}" as="f" hint-placeholder-count="6">
+                  <div onMouseEnter="{{ f.enter }}" onMouseLeave="{{ f.leave }}" style="{{ f.colStyle }}">
+                    <div style="{{ f.labelStyle }}">{{ f.label }}</div>
+                    <div style="{{ f.valueStyle }}">{{ f.value }}</div>
+                    <div style="flex:1;display:flex;align-items:flex-end;position:relative">
+                      <sc-if value="{{ f.hovered }}" hint-placeholder-val="{{ false }}">
+                        <div style="{{ f.tipStyle }}">{{ f.tip }}</div>
+                      </sc-if>
+                      <div style="{{ f.barStyle }}"></div>
                     </div>
-                    <div style="font-size:12.5px;font-weight:600;line-height:1.3">{{ a.title }}</div>
-                    <div style="font-size:11.5px;color:#7a8296">{{ a.meta }}</div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+
+            <div style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:14px 16px;display:flex;flex-direction:column;gap:10px;min-width:0;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px">
+                <h2 style="margin:0;font-size:14px;font-weight:700">Net profit</h2>
+                <button style="margin-left:auto;width:26px;height:26px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#8d94a6;cursor:pointer;font-size:12px;line-height:1" style-hover="background:#1b2130;color:#e8eaf0">···</button>
+              </div>
+              <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <div style="font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:600;letter-spacing:-.035em;line-height:1">{{ d.netProfit }}</div>
+                <span style="display:inline-flex;align-items:center;gap:5px;background:rgba(110,231,212,.13);border:1px solid rgba(110,231,212,.28);color:#6ee7d4;border-radius:999px;padding:4px 9px;font-size:11.5px;font-weight:700">▲ {{ d.deltaPct }}</span>
+              </div>
+              <div style="font-size:11.5px;color:#7a8296">{{ d.delta }} · margin {{ d.margin }}</div>
+              <div style="border-top:1px solid #1f2532;padding-top:10px;display:flex;flex-direction:column;gap:9px;flex:1;min-height:0;overflow:auto">
+                <sc-for list="{{ d.channels }}" as="c" hint-placeholder-count="3">
+                  <div style="display:flex;flex-direction:column;gap:6px">
+                    <div style="display:flex;align-items:baseline;gap:8px">
+                      <span style="font-size:12px;color:#c9d0e0">{{ c.name }}</span>
+                      <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:12px;color:#e8eaf0">{{ c.value }}</span>
+                    </div>
+                    <div style="height:8px;border-radius:999px;background:#1d2331;overflow:hidden"><div style="{{ c.barStyle }}"></div></div>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </section>
+
+          <section style="display:grid;grid-template-columns:1fr 1.25fr 1fr;gap:10px;align-items:stretch;flex:1 1 56%;min-height:360px">
+            <div style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:14px 16px 12px;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:10px">
+                <h2 style="margin:0;font-size:14px;font-weight:700">Capital tied up</h2>
+                <button style="margin-left:auto;width:26px;height:26px;border-radius:50%;border:1px solid #262d3d;background:transparent;color:#8d94a6;cursor:pointer;font-size:12px;line-height:1" style-hover="background:#1b2130;color:#e8eaf0">···</button>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:22px;font-weight:600;letter-spacing:-.02em">{{ d.capital }}</span>
+                <span style="font-size:11.5px;color:#7a8296">{{ d.units }} units</span>
+              </div>
+              <div style="position:relative;flex:1;min-height:96px">
+                <div style="position:absolute;left:50%;top:-2px;transform:translateX(-50%);background:#1f2635;border:1px solid #2b3346;border-radius:999px;padding:3px 9px;font-size:10.5px;font-weight:700;color:#f0a8c0;z-index:2;white-space:nowrap">{{ d.stalledChip }}</div>
+                <svg viewBox="0 0 220 100" preserveAspectRatio="none" style="width:100%;height:100%;display:block">
+                  <path d="{{ d.stepArea }}" fill="rgba(232,106,160,.10)"></path>
+                  <path d="{{ d.step }}" fill="none" stroke="#e86aa0" stroke-width="1.6" vector-effect="non-scaling-stroke"></path>
+                </svg>
+              </div>
+              <div style="display:flex;justify-content:space-between;font-size:10.5px;color:#5f6779;font-family:'JetBrains Mono',monospace">
+                <sc-for list="{{ d.months }}" as="m" hint-placeholder-count="6">
+                  <span>{{ m.label }}</span>
+                </sc-for>
+              </div>
+              <div style="flex:none;border-top:1px solid #1f2532;padding-top:9px;display:flex;flex-direction:column;gap:6px">
+                <div style="font-size:10px;font-weight:700;letter-spacing:.06em;color:#7a8296">AGING · {{ d.units }} UNITS HELD</div>
+                <sc-for list="{{ d.aging }}" as="g" hint-placeholder-count="4">
+                  <button onClick="{{ g.go }}" style="{{ g.rowStyle }}">
+                    <span style="font-size:11px;font-weight:600;color:#c9d0e0;width:52px;text-align:left">{{ g.bucket }}d</span>
+                    <span style="flex:1;height:5px;border-radius:5px;background:#1d2331;overflow:hidden"><span style="{{ g.barStyle }}"></span></span>
+                    <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#a9b1c2;width:22px;text-align:right">{{ g.units }}</span>
+                    <span style="{{ g.valueStyle }}">{{ g.value }}</span>
                   </button>
                 </sc-for>
               </div>
-            </section>
-          </sc-if>
+            </div>
 
-          <section style="display:grid;grid-template-columns:1.55fr 1fr;gap:13px">
-            <div style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:13px">
-              <div style="display:flex;align-items:center;gap:10px">
-                <h2 style="margin:0;font-size:13px;font-weight:700">Profit &amp; margin</h2>
-                <div style="margin-left:auto;display:flex;gap:3px;background:#10141e;border:1px solid #232a38;border-radius:999px;padding:3px">
-                  <sc-for list="{{ periods }}" as="p" hint-placeholder-count="5">
-                    <button onClick="{{ p.go }}" style="{{ p.style }}">{{ p.label }}</button>
-                  </sc-for>
-                </div>
-              </div>
-              <div style="display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap">
-                <div style="display:flex;flex-direction:column;gap:3px">
-                  <div style="font-size:10.5px;color:#7a8296;letter-spacing:.05em">NET PROFIT</div>
-                  <div style="font-family:'JetBrains Mono',monospace;font-size:33px;font-weight:600;letter-spacing:-.03em;line-height:1">{{ d.netProfit }}</div>
-                  <div style="font-size:11.5px;color:#6ee7d4">{{ d.delta }}</div>
-                </div>
-                <div style="display:flex;flex-direction:column;gap:3px">
-                  <div style="font-size:10.5px;color:#7a8296;letter-spacing:.05em">MARGIN</div>
-                  <div style="font-family:'JetBrains Mono',monospace;font-size:33px;font-weight:600;letter-spacing:-.03em;line-height:1;color:#6ee7d4">{{ d.margin }}</div>
-                </div>
-                <svg viewBox="0 0 220 56" preserveAspectRatio="none" style="height:56px;flex:1;min-width:140px">
-                  <path d="{{ d.sparkArea }}" fill="rgba(110,231,212,.10)"></path>
-                  <path d="{{ d.spark }}" fill="none" stroke="#6ee7d4" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"></path>
-                </svg>
-              </div>
-              <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;border-top:1px solid #1f2532;padding-top:12px">
-                <sc-for list="{{ d.breakdown }}" as="b" hint-placeholder-count="3">
-                  <div style="display:flex;flex-direction:column;gap:3px">
-                    <div style="font-size:10.5px;color:#7a8296;letter-spacing:.04em">{{ b.label }}</div>
-                    <div style="font-family:'JetBrains Mono',monospace;font-size:15px;font-weight:500">{{ b.value }}</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;grid-template-rows:1fr 1fr;gap:10px;min-width:0;min-height:0">
+              <sc-for list="{{ d.kpis }}" as="k" hint-placeholder-count="4">
+                <button onClick="{{ k.go }}" style="{{ k.style }}" style-hover="border-color:#2b3a5e">
+                  <div style="display:flex;align-items:center;gap:7px">
+                    <span style="{{ k.dot }}"></span>
+                    <span style="font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:#7a8296">{{ k.label }}</span>
                   </div>
+                  <div style="flex:1"></div>
+                  <div style="{{ k.valueStyle }}">{{ k.value }}</div>
+                  <div style="font-size:11px;color:#7a8296;line-height:1.35;text-align:left">{{ k.meta }}</div>
+                  <div style="height:4px;border-radius:4px;background:#1d2331;overflow:hidden;margin-top:2px"><div style="{{ k.barStyle }}"></div></div>
+                </button>
+              </sc-for>
+            </div>
+
+            <div style="border-radius:20px;background:linear-gradient(155deg,#1b2a4a 0%,#3a3a6e 45%,#e8907e 100%);padding:14px 16px;display:flex;flex-direction:column;gap:8px;min-width:0;min-height:0;overflow:hidden">
+              <div style="display:flex;align-items:center;gap:8px">
+                <span style="background:rgba(255,255,255,.22);border:1px solid rgba(255,255,255,.3);border-radius:999px;padding:3px 10px;font-size:10.5px;font-weight:700;color:#fff">Needs you</span>
+                <span style="font-size:10.5px;color:rgba(255,255,255,.72)">oldest first</span>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:6px;flex:1;min-height:0;overflow:auto">
+                <sc-for list="{{ attention }}" as="a" hint-placeholder-count="4">
+                  <button onClick="{{ a.go }}" style="text-align:left;cursor:pointer;font-family:inherit;color:#fff;border:1px solid rgba(255,255,255,.22);background:rgba(255,255,255,.13);border-radius:12px;padding:8px 10px;display:flex;flex-direction:column;gap:2px;min-width:0" style-hover="background:rgba(255,255,255,.22)">
+                    <span style="font-size:9.5px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:rgba(255,255,255,.72)">{{ a.kind }}</span>
+                    <span style="font-size:11.5px;font-weight:700;line-height:1.3">{{ a.title }}</span>
+                    <span style="font-size:10.5px;color:rgba(255,255,255,.72)">{{ a.meta }}</span>
+                  </button>
                 </sc-for>
               </div>
             </div>
-            <div style="display:flex;flex-direction:column;gap:13px">
-              <div style="flex:1;border-radius:20px;background:linear-gradient(140deg,#f7a08a,#e86aa0);padding:15px 16px;display:flex;flex-direction:column;color:#1c1418;min-height:104px">
-                <div style="display:flex;align-items:flex-start">
-                  <div style="font-size:12.5px;font-weight:700;line-height:1.25">Inbound<br/>in flight</div>
-                  <button onClick="{{ goShipments }}" style="margin-left:auto;width:26px;height:26px;border-radius:10px;border:0;background:rgba(255,255,255,.42);color:#1c1418;cursor:pointer;font-size:12px">↗</button>
-                </div>
-                <div style="flex:1"></div>
-                <div style="font-family:'JetBrains Mono',monospace;font-size:31px;font-weight:600;letter-spacing:-.03em">{{ d.inbound }}</div>
-                <div style="font-size:11px;font-weight:600;opacity:.75">{{ d.inboundStalled }}</div>
-              </div>
-              <div style="flex:1;border-radius:20px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);padding:15px 16px;display:flex;flex-direction:column;color:#101720;min-height:104px">
-                <div style="display:flex;align-items:flex-start">
-                  <div style="font-size:12.5px;font-weight:700;line-height:1.25">Outbound<br/>to buyers</div>
-                  <button onClick="{{ goShipments }}" style="margin-left:auto;width:26px;height:26px;border-radius:10px;border:0;background:rgba(255,255,255,.42);color:#101720;cursor:pointer;font-size:12px">↗</button>
-                </div>
-                <div style="flex:1"></div>
-                <div style="font-family:'JetBrains Mono',monospace;font-size:31px;font-weight:600;letter-spacing:-.03em">{{ d.outbound }}</div>
-                <div style="font-size:11px;font-weight:600;opacity:.75">{{ d.outboundStalled }}</div>
-              </div>
-            </div>
           </section>
 
-          <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px">
-            <div style="display:flex;align-items:baseline;gap:12px;margin-bottom:13px;flex-wrap:wrap">
-              <h2 style="margin:0;font-size:13px;font-weight:700">Stock on hand</h2>
-              <span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#c9d0e0">{{ d.units }} units</span>
-              <span style="font-family:'JetBrains Mono',monospace;font-size:12.5px;color:#c9d0e0">{{ d.capital }} tied up</span>
-              <button onClick="{{ goInventory }}" style="margin-left:auto;border:1px solid #232a38;background:transparent;color:#8fb0ff;border-radius:999px;padding:5px 13px;font-size:11.5px;font-family:inherit;cursor:pointer">Open inventory</button>
-            </div>
-            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:11px">
-              <sc-for list="{{ d.aging }}" as="g" hint-placeholder-count="4">
-                <button onClick="{{ g.go }}" style="{{ g.style }}">
-                  <div style="display:flex;align-items:baseline;gap:8px">
-                    <span style="font-size:11.5px;font-weight:700;color:#c9d0e0">{{ g.bucket }} days</span>
-                    <span style="{{ g.tagStyle }}">{{ g.tag }}</span>
-                  </div>
-                  <div style="font-family:'JetBrains Mono',monospace;font-size:21px;font-weight:600;letter-spacing:-.02em">{{ g.units }}</div>
-                  <div style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#8d94a6">{{ g.value }}</div>
-                  <div style="height:4px;border-radius:4px;background:#1d2331;overflow:hidden"><div style="{{ g.barStyle }}"></div></div>
-                </button>
-              </sc-for>
-            </div>
-          </section>
-
-          <sc-if value="{{ metricsFirst }}" hint-placeholder-val="{{ false }}">
-            <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:14px 16px">
-              <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
-                <h2 style="margin:0;font-size:13px;font-weight:700">Anomalies</h2>
-                <span style="font-size:11px;color:#8d94a6">stalled tracking and overdue deliveries</span>
-              </div>
-              <sc-for list="{{ attention }}" as="a" hint-placeholder-count="4">
-                <button onClick="{{ a.go }}" style="text-align:left;width:100%;cursor:pointer;font-family:inherit;color:inherit;border:0;background:transparent;border-top:1px solid #1c2230;padding:9px 4px;display:flex;align-items:center;gap:12px" style-hover="background:#171d2a">
-                  <span style="{{ a.dot }}"></span>
-                  <span style="font-size:12.5px;font-weight:600;flex:1;min-width:0">{{ a.title }}</span>
-                  <span style="font-size:11.5px;color:#7a8296">{{ a.meta }}</span>
-                </button>
-              </sc-for>
-            </section>
-          </sc-if>
         </div>
       </sc-if>
 
@@ -218,6 +271,10 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
           <div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap">
             <sc-for list="{{ statusFilters }}" as="f" hint-placeholder-count="9">
               <button onClick="{{ f.go }}" style="{{ f.style }}"><span style="{{ f.dot }}"></span>{{ f.label }} <span style="opacity:.55;font-family:'JetBrains Mono',monospace">{{ f.count }}</span></button>
+            </sc-for>
+            <span style="width:1px;height:20px;background:#242b3a"></span>
+            <sc-for list="{{ vatFilters }}" as="v" hint-placeholder-count="3">
+              <button onClick="{{ v.go }}" style="{{ v.style }}">{{ v.label }} <span style="opacity:.55;font-family:'JetBrains Mono',monospace">{{ v.count }}</span></button>
             </sc-for>
             <div style="flex:1"></div>
             <button onClick="{{ toggleDensity }}" style="border:1px solid #2b3346;background:#171d2a;color:#a9b1c2;border-radius:999px;padding:6px 12px;font-size:11.5px;font-family:inherit;cursor:pointer">{{ densityLabel }}</button>
@@ -255,6 +312,7 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
                 <div style="{{ r.cell }}">{{ r.brand }}</div>
                 <div style="{{ r.cellMono }}">{{ r.size }}</div>
                 <div><span style="{{ r.statusChip }}"><span style="{{ r.statusDot }}"></span>{{ r.statusLabel }}</span></div>
+                <div><span style="{{ r.vatChip }}" title="{{ r.vatTitle }}">{{ r.vatLabel }}<span style="opacity:.7;font-size:8px">{{ r.vatLock }}</span></span></div>
                 <div style="{{ r.cellMono }}">{{ r.purchasedAt }}</div>
                 <div style="{{ r.cellMonoRight }}">{{ r.purchasePrice }}</div>
                 <div style="{{ r.cellMonoRight }}">{{ r.listedPrice }}</div>
@@ -272,7 +330,7 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
               </div>
             </sc-if>
           </div>
-          <div style="font-size:11px;color:#5f6779;padding-left:4px">{{ rowCountLabel }} · click a row to open · Esc closes</div>
+          <div style="font-size:11px;color:#5f6779;padding-left:4px;line-height:1.5">{{ rowCountLabel }} · click a row to open · Esc closes<br/>{{ vatNote }}</div>
         </div>
       </sc-if>
 
@@ -425,6 +483,7 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
 
       <sc-if value="{{ showReview }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:11px;max-width:960px">
+          <button onClick="{{ goSettings }}" style="align-self:flex-start;border:1px solid #2b3346;background:#171d2a;color:#a9b1c2;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer" style-hover="color:#e8eaf0">← Settings</button>
           <sc-if value="{{ reviewEmpty }}" hint-placeholder-val="{{ false }}">
             <div style="margin:70px auto;text-align:center;display:flex;flex-direction:column;align-items:center;gap:12px;max-width:420px">
               <div style="width:56px;height:56px;border-radius:20px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);display:flex;align-items:center;justify-content:center;color:#0b0d12;font-size:24px;font-weight:800">✓</div>
@@ -507,6 +566,14 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
 
       <sc-if value="{{ showSettings }}" hint-placeholder-val="{{ false }}">
         <div style="display:flex;flex-direction:column;gap:13px;max-width:920px">
+          <button onClick="{{ goReview }}" style="text-align:left;cursor:pointer;font-family:inherit;color:inherit;border:1px solid #33262c;border-radius:20px;background:linear-gradient(120deg,rgba(232,106,160,.12),rgba(247,160,138,.03));padding:14px 18px;display:flex;align-items:center;gap:14px" style-hover="border-color:#4a2f3a">
+            <span style="min-width:26px;height:24px;padding:0 8px;border-radius:8px;background:#ff6a9c;color:#170a12;font-size:12.5px;font-weight:800;display:flex;align-items:center;justify-content:center">{{ reviewCount }}</span>
+            <span style="display:flex;flex-direction:column;gap:2px">
+              <span style="font-size:13.5px;font-weight:700">Review queue</span>
+              <span style="font-size:11.5px;color:#8d94a6">Emails no parser recognised. Work through them so nothing is lost silently.</span>
+            </span>
+            <span style="margin-left:auto;font-size:12px;color:#8fb0ff">Open queue →</span>
+          </button>
           <section style="border:1px solid #1f2532;border-radius:20px;background:#141824;padding:16px 18px;display:flex;flex-direction:column;gap:11px">
             <div style="display:flex;align-items:baseline;gap:10px">
               <h2 style="margin:0;font-size:13.5px;font-weight:700">Email accounts</h2>
@@ -596,6 +663,7 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
             <div style="display:flex;align-items:baseline;gap:10px">
               <h2 style="margin:0;font-size:13.5px;font-weight:700">Parsers</h2>
               <span style="font-size:11.5px;color:#7a8296">read-only · answers “why was this email not picked up”</span>
+              <button onClick="{{ cycleState }}" style="margin-left:auto;border:1px solid #2b3346;background:#171d2a;color:#a9b1c2;border-radius:999px;padding:6px 13px;font-size:11.5px;font-family:inherit;cursor:pointer" style-hover="color:#e8eaf0">{{ stateLabel }}</button>
             </div>
             <sc-for list="{{ parsers }}" as="p" hint-placeholder-count="5">
               <div style="display:flex;align-items:center;gap:12px;padding:7px 0;border-top:1px solid #1c2230">
@@ -609,6 +677,78 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
       </sc-if>
     </div>
   </main>
+
+  <sc-if value="{{ updater }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;background:rgba(6,8,12,.62);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;z-index:60">
+      <div style="width:460px;background:#141824;border:1px solid #262d3d;border-radius:22px;box-shadow:0 30px 80px rgba(0,0,0,.6);overflow:hidden">
+        <div style="display:flex;align-items:center;gap:8px;padding:10px 14px;background:#10141e;border-bottom:1px solid #1f2532">
+          <span style="width:9px;height:9px;border-radius:50%;background:#3a4considered;background:#333c4f"></span>
+          <span style="width:9px;height:9px;border-radius:50%;background:#333c4f"></span>
+          <span style="width:9px;height:9px;border-radius:50%;background:#333c4f"></span>
+          <span style="margin-left:6px;font-size:11px;font-weight:600;color:#7a8296">Software update</span>
+          <button onClick="{{ closeUpdater }}" style="margin-left:auto;border:0;background:transparent;color:#6f7789;font-size:15px;cursor:pointer;line-height:1">×</button>
+        </div>
+        <div style="padding:20px 22px 18px;display:flex;flex-direction:column;gap:14px">
+          <div style="display:flex;gap:14px;align-items:flex-start">
+            <div style="{{ updater.iconStyle }}"></div>
+            <div style="display:flex;flex-direction:column;gap:4px;min-width:0">
+              <div style="font-size:16px;font-weight:700;letter-spacing:-.02em">{{ updater.title }}</div>
+              <div style="font-size:12px;color:#8d94a6;line-height:1.5">{{ updater.subtitle }}</div>
+            </div>
+          </div>
+
+          <sc-if value="{{ updater.showProgress }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-direction:column;gap:7px">
+              <div style="height:6px;border-radius:6px;background:#1d2331;overflow:hidden">
+                <div style="{{ updater.barStyle }}"></div>
+              </div>
+              <div style="display:flex;align-items:baseline;gap:8px">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:#c9d0e0">{{ updater.progressLabel }}</span>
+                <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:11px;color:#7a8296">{{ updater.rate }}</span>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ updater.showSteps }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid #1f2532;border-radius:14px;background:#10141e;padding:11px 13px;display:flex;flex-direction:column;gap:8px">
+              <sc-for list="{{ updater.steps }}" as="s" hint-placeholder-count="4">
+                <div style="display:flex;align-items:center;gap:9px">
+                  <span style="{{ s.dot }}"></span>
+                  <span style="{{ s.labelStyle }}">{{ s.label }}</span>
+                  <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#6f7789">{{ s.note }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ updater.showNotes }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid #1f2532;border-radius:14px;background:#10141e;padding:12px 13px;display:flex;flex-direction:column;gap:7px;max-height:150px;overflow:auto">
+              <div style="font-size:10px;font-weight:700;letter-spacing:.06em;color:#7a8296">WHAT CHANGED</div>
+              <sc-for list="{{ updater.notes }}" as="n" hint-placeholder-count="4">
+                <div style="display:flex;gap:9px;align-items:flex-start">
+                  <span style="width:5px;height:5px;border-radius:50%;background:#5b8cff;margin-top:6px;flex:none"></span>
+                  <span style="font-size:12px;line-height:1.5;color:#a9b1c2">{{ n.text }}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ updater.warning }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;gap:9px;align-items:flex-start;border:1px solid #4a4030;background:rgba(247,160,138,.10);border-radius:12px;padding:9px 11px">
+              <span style="width:6px;height:6px;border-radius:50%;background:#f7a08a;margin-top:6px;flex:none"></span>
+              <span style="font-size:11.5px;line-height:1.5;color:#e3c9bd">{{ updater.warning }}</span>
+            </div>
+          </sc-if>
+
+          <div style="display:flex;gap:8px;align-items:center;padding-top:2px">
+            <button onClick="{{ updater.primary.go }}" style="{{ updater.primary.style }}">{{ updater.primary.label }}</button>
+            <button onClick="{{ updater.secondary.go }}" style="{{ updater.secondary.style }}">{{ updater.secondary.label }}</button>
+            <span style="margin-left:auto;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:#5f6779">{{ updater.version }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
 
   <sc-if value="{{ drawer }}" hint-placeholder-val="{{ false }}">
     <aside style="position:fixed;top:14px;right:14px;bottom:14px;width:500px;background:#12161f;border:1px solid #232a38;border-radius:22px;box-shadow:-24px 0 60px rgba(0,0,0,.5);display:flex;flex-direction:column;z-index:40;overflow:hidden">
@@ -697,6 +837,28 @@ a{color:#8fb0ff;text-decoration:none}a:hover{color:#b9cdff}
       </sc-if>
     </aside>
   </sc-if>
+ </div>
+ </sc-if>
+ <div style="position:fixed;left:16px;bottom:16px;display:flex;flex-direction:column;gap:8px;z-index:80;pointer-events:none">
+   <sc-for list="{{ toasts }}" as="t" hint-placeholder-count="0">
+     <div style="{{ t.style }}">
+       <span style="{{ t.dot }}"></span>
+       <span style="display:flex;flex-direction:column;gap:2px">
+         <span style="font-size:12px;font-weight:700;color:#e8eaf0">{{ t.title }}</span>
+         <span style="font-size:11px;color:#8d94a6">{{ t.meta }}</span>
+       </span>
+     </div>
+   </sc-for>
+ </div>
+ <sc-if value="{{ windowHidden }}" hint-placeholder-val="{{ false }}">
+   <div style="flex:1;display:flex;align-items:center;justify-content:center">
+     <button onClick="{{ winRestore }}" style="display:flex;flex-direction:column;align-items:center;gap:10px;border:1px solid #1f2532;background:#141824;border-radius:20px;padding:22px 26px;cursor:pointer;font-family:inherit;color:inherit" style-hover="border-color:#2b3a5e">
+       <span style="width:34px;height:34px;border-radius:12px;background:linear-gradient(140deg,#6ee7d4,#5b8cff);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:15px;color:#0b0d12">R</span>
+       <span style="font-size:12.5px;font-weight:700">{{ hiddenLabel }}</span>
+       <span style="font-size:11px;color:#7a8296">Click to reopen the window</span>
+     </button>
+   </div>
+ </sc-if>
 </div>
 
 </x-dc>
@@ -737,6 +899,11 @@ const ITEMS = [
   ['Denim Tears Sweatpants','Denim Tears','M','new','incoming',210,null,'2026-08-13',5,'\u2014','SSENSE','DT-SWP-M'],
   ['Submariner 124060 full set','Rolex','\u2014','used','in_stock',1450,null,'2026-01-22',209,'Safe','Chrono24','RLX-SUB-124060']
 ].map((r, i) => ({ id: 'itm_' + (100 + i), title: r[0], brand: r[1], size: r[2], condition: r[3], status: r[4], purchasePrice: eur(r[5]), listedPrice: r[6] == null ? null : eur(r[6]), purchasedAt: r[7], daysHeld: r[8], location: r[9], retailer: r[10], sku: r[11] }));
+
+// Business vendors always invoice with VAT, so anything sourced from them is a BTW item.
+const VAT_VENDORS = ['Bol.com', 'MediaMarkt', 'Nike.com', 'Snipes', 'JD Sports', 'END.', 'SSENSE', 'Overkill', 'Asphaltgold', 'Slam Jam', 'Supreme EU', 'adidas', 'Corteiz', 'Ticketmaster'];
+const vatScheme = (retailer) => VAT_VENDORS.includes(retailer) ? 'btw' : 'marge';
+ITEMS.forEach(i => { i.vatScheme = vatScheme(i.retailer); i.vatLocked = VAT_VENDORS.includes(i.retailer); });
 
 const PURCHASES = [
   ['Snipes','SNP-88412','2026-06-14',1,109,0,22.89,109,'delivered',null],
@@ -782,8 +949,16 @@ const REVIEW = [
   { from: 'PostNL', address: 'noreply@postnl.nl', subject: 'Bezorging niet gelukt \u2014 3SBTC0294817263', received: '16 Aug 18:27', preview: 'We hebben je pakket niet kunnen bezorgen. Het pakket ligt klaar bij PostNL punt Ferdinand Bolstraat 12.' }
 ];
 
-const NAV = ['Dashboard', 'Inventory', 'Purchases', 'Sales', 'Shipments', 'Review', 'Reports', 'Settings'];
-const NAV_HUE = [178, 225, 285, 148, 40, 350, 260, 220];
+const NAV = ['Dashboard', 'Inventory', 'Purchases', 'Sales', 'Shipments', 'Reports', 'Settings'];
+const NAV_ICON = [
+  'M2.5 2.5h4v4h-4zM9.5 2.5h4v4h-4zM2.5 9.5h4v4h-4zM9.5 9.5h4v4h-4z',
+  'M2.5 5.5 8 2.5l5.5 3v5L8 13.5 2.5 10.5zM2.5 5.5 8 8.5l5.5-3M8 8.5v5',
+  'M3.5 5.5h9l-1 8h-7zM6 5.5V4.2a2 2 0 0 1 4 0v1.3',
+  'M8.5 2.5H13V7L7 13 2.5 8.5zM10.5 5h.01',
+  'M2 5h6.5v5H2zM8.5 6.5h2.6L13 8.4V10H8.5M4 12h.01M11 12h.01',
+  'M3.5 12.5V8M8 12.5V4M12.5 12.5V7',
+  'M3 5.5h10M3 10.5h10M6.2 3.6v3.8M10 8.6v3.8'
+];
 
 class Component extends DCLogic {
   state = {
@@ -791,20 +966,109 @@ class Component extends DCLogic {
     sort: { col: 'daysHeld', dir: 'desc' }, selected: [], dense: true, openItem: null, confirming: false,
     expandedPurchase: null, refundOnly: false, groupSales: true, shipFilter: 'attention', openShip: 'shp_0',
     reviewTab: 'pl', recording: null, addingAccount: false, provider: 'Gmail', testResult: '',
-    notifOn: [0, 1, 3, 4, 5, 7], attentionFirst: true, syncState: 'idle'
+    notifOn: [0, 1, 3, 4, 5, 7], attentionFirst: true, syncState: 'idle',
+    updater: null, updateProgress: 0, updateDismissed: false, win: 'maximized',
+    funnelHover: null, granularity: 'Daily', askValue: '', vatFilter: 'all',
+    alertsOpen: false, toasts: [], alerts: [
+      { id: 1, title: 'Shipment exception — PostNL', meta: 'Delivery failed, parcel held at pickup point', at: '2m', hue: 18, screen: 'Shipments', unread: true },
+      { id: 2, title: 'Refund still outstanding', meta: 'JD Sports €179.95, cancelled 9 days ago', at: '1h', hue: 350, screen: 'Purchases', unread: true },
+      { id: 3, title: '4 emails need review', meta: 'No parser recognised them', at: '3h', hue: 285, screen: 'Review', unread: true },
+      { id: 4, title: 'Item sold — Stone Island Ghost Hoodie', meta: 'Vinted €420.00, profit €102.05', at: '5h', hue: 148, screen: 'Sales', unread: false }
+    ]
   };
+
+  _tid = 100;
+  toast = (title, meta, hue) => {
+    const id = ++this._tid;
+    this.setState(s => ({ toasts: s.toasts.concat({ id, title, meta, hue }) }));
+    setTimeout(() => this.setState(s => ({ toasts: s.toasts.filter(t => t.id !== id) })), 4000);
+  };
+
+  tick = () => {
+    this.setState(s => {
+      if (s.updater !== 'downloading' && s.updater !== 'installing') return null;
+      const p = s.updateProgress + (s.updater === 'downloading' ? 2.4 : 1.6);
+      if (s.updater === 'downloading' && p >= 100) return { updater: 'installing', updateProgress: 0 };
+      if (s.updater === 'installing' && p >= 100) { clearInterval(this._t); this._t = null; return { updater: 'ready', updateProgress: 100 }; }
+      return { updateProgress: p };
+    });
+  };
+  startUpdate = () => { if (!this._t) this._t = setInterval(this.tick, 90); this.setState({ updater: 'downloading', updateProgress: 0 }); this.toast('Downloading v2.4.0', '38.2 MB · runs in the background', 232); };
+  stopUpdate = () => { clearInterval(this._t); this._t = null; };
 
   componentDidMount() {
     this._key = (e) => { if (e.key === 'Escape') this.setState({ openItem: null, confirming: false }); };
     window.addEventListener('keydown', this._key);
   }
-  componentWillUnmount() { window.removeEventListener('keydown', this._key); }
+  componentWillUnmount() { window.removeEventListener('keydown', this._key); this.stopUpdate(); }
+
+  updaterVals() {
+    const st = this.state;
+    if (!st.updater) return null;
+    const pct = Math.min(100, st.updateProgress);
+    const btn = (bg, color, border) => `border:${border || 0};background:${bg};color:${color};border-radius:999px;padding:9px 16px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer`;
+    const ghost = btn('transparent', '#a9b1c2', '1px solid #2b3346');
+    const step = (state, label, note) => ({
+      label, note,
+      dot: `width:8px;height:8px;border-radius:50%;flex:none;background:${state === 'done' ? 'oklch(0.78 0.12 148)' : state === 'active' ? '#5b8cff' : '#2b3346'}${state === 'active' ? ';animation:pulseGlow 1.2s ease-in-out infinite' : ''}`,
+      labelStyle: `font-size:12px;color:${state === 'pending' ? '#6f7789' : '#d8dde8'};font-weight:${state === 'active' ? 700 : 400}`
+    });
+    const iconStyle = (from, to) => `width:44px;height:44px;flex:none;border-radius:14px;background:linear-gradient(140deg,${from},${to})`;
+    const notes = [
+      { text: 'New parsers for Zalando, Chrono24 and TicketSwap' },
+      { text: 'VAT return now flags transactions excluded from the period' },
+      { text: 'Shipment stall detection moved from 10 to 7 days' },
+      { text: 'Fixes a crash when a marketplace returned a null payout' }
+    ];
+
+    if (st.updater === 'available') return {
+      title: 'Version 2.4.0 is available', subtitle: 'You are on 2.3.6. The update downloads in the background; you can keep working.',
+      iconStyle: iconStyle('#6ee7d4', '#5b8cff'), showNotes: true, notes, version: '38.2 MB · released 16 Aug 2026',
+      primary: { label: 'Download and install', go: this.startUpdate, style: btn('#5b8cff', '#0b1020') },
+      secondary: { label: 'Later', go: () => this.setState({ updater: null }), style: ghost }
+    };
+
+    if (st.updater === 'downloading') return {
+      title: 'Downloading update', subtitle: 'Version 2.4.0 · your data is untouched until the install step.',
+      iconStyle: iconStyle('#6ee7d4', '#5b8cff'), showProgress: true, showSteps: true,
+      barStyle: `width:${pct}%;height:100%;background:linear-gradient(90deg,#6ee7d4,#5b8cff);transition:width .12s linear`,
+      progressLabel: Math.round(pct) + '% · ' + (38.2 * pct / 100).toFixed(1) + ' MB of 38.2 MB',
+      rate: '4.1 MB/s · ~' + Math.max(1, Math.round((100 - pct) / 12)) + 's left',
+      steps: [step('active', 'Downloading package', Math.round(pct) + '%'), step('pending', 'Verifying signature', ''), step('pending', 'Migrating local database', '4 migrations'), step('pending', 'Restarting', '')],
+      version: 'v2.3.6 → v2.4.0',
+      primary: { label: 'Run in background', go: () => this.setState({ updater: null }), style: btn('#5b8cff', '#0b1020') },
+      secondary: { label: 'Cancel update', go: () => { this.stopUpdate(); this.setState({ updater: 'available', updateProgress: 0 }); }, style: ghost }
+    };
+
+    if (st.updater === 'installing') return {
+      title: 'Installing update', subtitle: 'Migrating the local database. Do not quit the application.',
+      iconStyle: iconStyle('#f7a08a', '#e86aa0'), showProgress: true, showSteps: true,
+      barStyle: `width:${pct}%;height:100%;background:linear-gradient(90deg,#f7a08a,#e86aa0);transition:width .12s linear`,
+      progressLabel: 'Migration ' + Math.min(4, Math.floor(pct / 25) + 1) + ' of 4 · ' + Math.round(pct) + '%',
+      rate: '18 420 records',
+      steps: [step('done', 'Downloading package', '38.2 MB'), step('done', 'Verifying signature', 'valid'), step('active', 'Migrating local database', Math.min(4, Math.floor(pct / 25) + 1) + '/4'), step('pending', 'Restarting', '')],
+      warning: 'Email sync is paused during the migration. Anything that arrives now is picked up on the next sync.',
+      version: 'v2.3.6 → v2.4.0',
+      primary: { label: 'Installing…', go: () => {}, style: btn('#242c3e', '#7a8296') },
+      secondary: { label: 'Hide window', go: () => this.setState({ updater: null }), style: ghost }
+    };
+
+    return {
+      title: 'Update installed', subtitle: 'Version 2.4.0 is ready. Restart to finish; your queue and filters are restored.',
+      iconStyle: iconStyle('#6ee7d4', '#5b8cff'), showSteps: true,
+      steps: [step('done', 'Downloading package', '38.2 MB'), step('done', 'Verifying signature', 'valid'), step('done', 'Migrating local database', '4/4'), step('active', 'Restart required', '')],
+      version: 'now on v2.4.0',
+      primary: { label: 'Restart now', go: () => this.setState({ updater: null, updateDismissed: true }), style: btn('#6ee7d4', '#0d1a18') },
+      secondary: { label: 'Restart later', go: () => this.setState({ updater: null, updateDismissed: true }), style: ghost }
+    };
+  }
 
   go = (screen) => () => this.setState({ screen, openItem: null });
 
   filteredItems() {
     const q = this.state.query.trim().toLowerCase();
     return ITEMS.filter(i => (this.state.statusFilter === 'all' || i.status === this.state.statusFilter)
+      && (this.state.vatFilter === 'all' || i.vatScheme === this.state.vatFilter)
       && (!q || i.title.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q)))
       .sort((a, b) => {
         const { col, dir } = this.state.sort, m = dir === 'asc' ? 1 : -1;
@@ -818,7 +1082,7 @@ class Component extends DCLogic {
     const st = this.state;
     const S = st.dataState;
     const rowH = st.dense ? '30px' : '42px';
-    const grid = `display:grid;grid-template-columns:26px 34px minmax(190px,2fr) 96px 60px 118px 84px 84px 84px 62px 84px 96px;gap:10px;align-items:center;padding:0 14px;min-width:1160px`;
+    const grid = `display:grid;grid-template-columns:26px 34px minmax(190px,2fr) 96px 60px 118px 92px 84px 84px 84px 62px 84px 96px;gap:10px;align-items:center;padding:0 14px;min-width:1250px`;
     const purGrid = 'display:grid;grid-template-columns:18px 110px 130px 84px 48px 90px 84px 84px 92px 118px 96px;gap:10px;align-items:center;min-width:1082px';
     const salesGrid = 'display:grid;grid-template-columns:minmax(180px,2fr) 110px 84px 80px 74px 80px 74px 88px 92px 74px;gap:10px;align-items:center;min-width:1056px';
     const shipGrid = 'display:grid;grid-template-columns:56px 120px 150px minmax(140px,1fr) 140px 96px 76px;gap:10px;align-items:center;min-width:880px';
@@ -826,9 +1090,10 @@ class Component extends DCLogic {
     const nav = NAV.map((label, i) => {
       const on = st.screen === label;
       return {
-        label, go: this.go(label), badge: label === 'Review' ? REVIEW.length : null,
-        style: `display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;border:0;background:${on ? '#1f2635' : 'transparent'};color:${on ? '#eef1f7' : '#98a0b3'};border-radius:12px;padding:9px 11px;font-family:inherit;font-size:12.5px;font-weight:${on ? 700 : 500};cursor:pointer`,
-        dotStyle: `width:7px;height:7px;border-radius:50%;background:oklch(0.76 0.13 ${NAV_HUE[i]});opacity:${on ? 1 : .45};flex:none`
+        label, go: this.go(label), badge: label === 'Settings' ? REVIEW.length : null,
+        style: `display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;border:0;background:${on ? '#1f2635' : '#141824'};color:${on ? '#eef1f7' : '#98a0b3'};border-radius:14px;padding:11px 13px;font-family:inherit;font-size:12.5px;font-weight:${on ? 700 : 500};cursor:pointer`,
+        icon: NAV_ICON[i],
+        iconStyle: `width:15px;height:15px;flex:none;opacity:${on ? 1 : .68}`
       };
     });
 
@@ -842,7 +1107,7 @@ class Component extends DCLogic {
     const sync = {
       title: sm.title, detail: sm.detail, showBar: !!sm.bar,
       dot: `width:7px;height:7px;border-radius:50%;background:${sm.dotc};flex:none;animation:${sm.bar ? 'pulseGlow 1.4s ease-in-out infinite' : 'none'}`,
-      barStyle: `width:${sm.bar || 0}%;height:100%;background:${sm.dotc}`
+      barStyle: `display:block;width:${sm.bar || 0}%;height:100%;background:${sm.dotc}`
     };
 
     const SUBS = {
@@ -872,8 +1137,80 @@ class Component extends DCLogic {
     const agingData = [['0-30', 4, 823, 148], ['31-60', 5, 1112, 250], ['61-90', 3, 664, 285], ['90+', 4, 2385, 25]];
     const totalUnits = 16;
 
+    const FUNNEL = [
+      ['Bought', 42, 'Purchases confirmed by email'],
+      ['Received', 38, '4 still inbound \u00b7 1 stalled'],
+      ['Listed', 31, '7 held but never listed'],
+      ['Sold', 24, 'Conversion from listed: 77%'],
+      ['Shipped', 22, '2 awaiting a label'],
+      ['Delivered', 19, '3 in transit to buyers']
+    ];
+    const fmax = FUNNEL[0][1];
+    const funnel = FUNNEL.map(([label, value, note], i) => {
+      const on = st.funnelHover === i;
+      const hue = 232 - i * 14;
+      return {
+        label, value, hovered: on,
+        tip: value + ' units \u00b7 ' + (i ? 'from previous: ' + Math.round((value / FUNNEL[i - 1][1]) * 100) + '% \u00b7 drop-off: -' + Math.round(100 - (value / FUNNEL[i - 1][1]) * 100) + '%' : note),
+        enter: () => this.setState({ funnelHover: i }), leave: () => this.setState({ funnelHover: null }),
+        tipStyle: `position:absolute;${i > FUNNEL.length - 3 ? 'right:2px' : 'left:2px'};top:8px;z-index:5;max-width:200px;pointer-events:none;background:#0b0d12;border:1px solid #303a4e;border-radius:10px;padding:6px 10px;font-size:11px;line-height:1.4;color:#c9d0e0;box-shadow:0 10px 26px rgba(0,0,0,.55)`,
+        colStyle: `flex:1;min-width:0;display:flex;flex-direction:column;gap:5px;padding:10px 3px 0;border-radius:14px 14px 0 0;background:${on ? 'linear-gradient(180deg,rgba(91,140,255,.13),transparent)' : 'transparent'};border:1px solid ${on ? '#2b3a5e' : 'transparent'};border-bottom:0;cursor:default`,
+        labelStyle: `font-size:10px;font-weight:600;color:${on ? '#c9d0e0' : '#5f6779'};line-height:1.25;min-height:25px`,
+        valueStyle: `font-family:'JetBrains Mono',monospace;font-size:${on ? 22 : 19}px;font-weight:600;letter-spacing:-.03em;color:${on ? '#e8eaf0' : '#6f7789'}`,
+        barStyle: `width:100%;height:${(value / fmax) * 100}%;border-radius:8px 8px 0 0;background:${on ? `linear-gradient(180deg,oklch(0.68 0.17 ${hue}),oklch(0.55 0.19 ${hue}))` : `repeating-linear-gradient(135deg,oklch(0.70 0.13 ${hue} / .55) 0 3px,oklch(0.70 0.13 ${hue} / .16) 3px 7px)`};border:1px solid ${on ? 'transparent' : `oklch(0.70 0.13 ${hue} / .30)`};border-bottom:0`
+      };
+    });
+
+    const CH = [['Vinted', 1402.30, 148], ['TicketSwap', 1421.75, 232], ['StockX', 742.10, 285]];
+    const chMax = Math.max(...CH.map(c => c[1]));
+    const channels = CH.map(([name, v, hue]) => ({
+      name, value: money(eur(v)),
+      barStyle: `width:${(v / chMax) * 100}%;height:100%;border-radius:999px;background:repeating-linear-gradient(135deg,oklch(0.76 0.13 ${hue}) 0 4px,oklch(0.76 0.13 ${hue} / .55) 4px 8px)`
+    }));
+
+    const cap = [2.1, 2.6, 2.4, 3.3, 3.1, 4.2, 3.9, 4.6, 4.4, 5.2, 4.9, 4.98];
+    const cmax = 5.6;
+    let step = `M0,${(100 - (cap[0] / cmax) * 92).toFixed(1)}`;
+    cap.forEach((v, i) => {
+      const x = (i / (cap.length - 1)) * 220, y = 100 - (v / cmax) * 92;
+      step += ` L${x.toFixed(1)},${(100 - (cap[Math.max(0, i - 1)] / cmax) * 92).toFixed(1)} L${x.toFixed(1)},${y.toFixed(1)}`;
+    });
+
+    const dotCard = (title, value, peak, delta, hue, counts, peakIdx) => ({
+      title, value, peak, delta,
+      deltaStyle: `font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:oklch(0.78 0.12 ${hue})`,
+      cols: counts.map((n, ci) => ({
+        dots: Array.from({ length: n }, (_, di) => ({
+          style: `width:6px;height:6px;border-radius:2px;background:oklch(0.78 0.13 ${hue});opacity:${ci === peakIdx ? 1 : 0.28 + di * 0.06};display:block`
+        }))
+      }))
+    });
+
     const d = {
-      netProfit: money(eur(4318.55)), margin: '27.4%', delta: '\u2191 \u20ac612.40 vs last month',
+      netProfit: money(eur(4318.55)), margin: '27.4%', delta: '\u2191 \u20ac612.40 vs previous period', deltaPct: '16.5%',
+      periodLabel: 'Aug 01 \u2013 Aug 31', prevLabel: 'Jul 01 \u2013 Jul 31', granularity: st.granularity,
+      funnel, channels, step, stepArea: step + ' L220,100 L0,100 Z',
+      stalledChip: '\u20ac2,385 stalled 90+ days',
+      months: ['Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug'].map(label => ({ label })),
+      dotCards: [
+        dotCard('Units sold', '24', 'Peak: Sat', '+6', 148, [1, 2, 1, 2, 3, 4, 2, 1, 2, 3, 1, 2, 3, 1], 5),
+        dotCard('Items received', '38', 'Highest: Tue', '+11', 232, [2, 1, 3, 4, 2, 1, 2, 2, 3, 1, 2, 1, 3, 2], 3)
+      ],
+      kpis: [
+        ['Bought', '42', money(eur(10312.85)) + ' spent \u00b7 7 orders', 285, 100, this.go('Purchases')],
+        ['Sold', '24', money(eur(15762.40)) + ' revenue \u00b7 2 at a loss', 148, 57, this.go('Sales')],
+        ['Incoming', '3', '1 stalled \u00b7 ' + money(eur(612.90)) + ' in transit', 40, 18, this.go('Shipments')],
+        ['Biggest vendor', 'Nike.com', '11 units \u00b7 ' + money(eur(2840)) + ' \u00b7 26% of spend', 225, 26, this.go('Purchases')]
+      ].map(([label, value, meta, hue, pct, go]) => ({
+        label, value, meta, go,
+        style: 'text-align:left;cursor:pointer;font-family:inherit;color:inherit;border:1px solid #1f2532;background:#141824;border-radius:18px;padding:12px 14px;display:flex;flex-direction:column;gap:4px;min-width:0;min-height:0;overflow:hidden',
+        dot: `width:7px;height:7px;border-radius:50%;background:oklch(0.76 0.13 ${hue});flex:none`,
+        valueStyle: `font-family:'JetBrains Mono',monospace;font-size:${value.length > 6 ? 19 : 27}px;font-weight:600;letter-spacing:-.03em;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis`,
+        barStyle: `width:${pct}%;height:100%;background:oklch(0.76 0.13 ${hue})`
+      })),
+      insightStat: '2',
+      insightTitle: 'Shipments have not moved in over 7 days',
+      insightBody: 'Both are outbound and past their expected delivery date. Together they hold \u20ac540 of payout that will not land until they resolve.',
       breakdown: [{ label: 'REVENUE', value: money(eur(15762.40)) }, { label: 'COST OF GOODS', value: money(eur(10312.85)) }, { label: 'FEES', value: money(eur(1131.00)) }],
       spark, sparkArea: spark + ' L220,56 L0,56 Z',
       inbound: '3', inboundStalled: '1 with no movement 7+ days',
@@ -884,9 +1221,11 @@ class Component extends DCLogic {
         return {
           bucket, units, value: money(eur(value)), tag: stalled ? 'stalled capital' : '',
           go: this.go('Inventory'),
-          style: `text-align:left;cursor:pointer;font-family:inherit;color:inherit;display:flex;flex-direction:column;gap:6px;border:1px solid ${stalled ? '#4a2f3a' : '#212736'};background:${stalled ? 'rgba(232,106,160,.08)' : '#10141e'};border-radius:16px;padding:11px 12px`,
+          style: `text-align:left;cursor:pointer;font-family:inherit;color:inherit;display:flex;flex-direction:column;gap:4px;border:1px solid ${stalled ? '#4a2f3a' : '#212736'};background:${stalled ? 'rgba(232,106,160,.08)' : '#10141e'};border-radius:14px;padding:8px 11px`,
           tagStyle: stalled ? 'font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:#e86aa0' : 'display:none',
-          barStyle: `width:${(units / totalUnits) * 100}%;height:100%;background:oklch(0.76 0.13 ${hue})`
+          rowStyle: `display:flex;align-items:center;gap:9px;width:100%;border:0;background:transparent;padding:2px 0;cursor:pointer;font-family:inherit;color:inherit`,
+          valueStyle: `font-family:'JetBrains Mono',monospace;font-size:11px;width:66px;text-align:right;color:${stalled ? '#f0a8c0' : '#8d94a6'};font-weight:${stalled ? 700 : 400}`,
+          barStyle: `display:block;width:${(units / totalUnits) * 100}%;height:100%;background:oklch(0.76 0.13 ${hue})`
         };
       })
     };
@@ -902,7 +1241,7 @@ class Component extends DCLogic {
         dot: f.key === 'all' ? 'display:none' : sdot(f.key)
       }));
 
-    const COLS = [['title', 'Item'], ['brand', 'Brand'], ['size', 'Size'], ['status', 'Status'], ['purchasedAt', 'Bought'], ['purchasePrice', 'Cost'], ['listedPrice', 'Listed'], ['daysHeld', 'Days'], ['location', 'Location'], ['retailer', 'Retailer']];
+    const COLS = [['title', 'Item'], ['brand', 'Brand'], ['size', 'Size'], ['status', 'Status'], ['vatScheme', 'VAT'], ['purchasedAt', 'Bought'], ['purchasePrice', 'Cost'], ['listedPrice', 'Listed'], ['daysHeld', 'Days'], ['location', 'Location'], ['retailer', 'Retailer']];
     const invCols = COLS.map(([key, label]) => ({
       label, arrow: st.sort.col === key ? (st.sort.dir === 'asc' ? ' \u2191' : ' \u2193') : '',
       go: () => this.setState({ sort: { col: key, dir: st.sort.col === key && st.sort.dir === 'desc' ? 'asc' : 'desc' } }),
@@ -918,6 +1257,12 @@ class Component extends DCLogic {
         purchasePrice: money(i.purchasePrice), listedPrice: money(i.listedPrice), daysHeld: i.daysHeld,
         location: i.location, retailer: i.retailer, statusLabel: STATUS[i.status].label,
         statusChip: chip(i.status), statusDot: sdot(i.status),
+        vatLabel: i.vatScheme === 'btw' ? 'BTW 21%' : 'Marge',
+        vatLock: i.vatLocked ? '\u25c6' : '',
+        vatTitle: i.vatLocked ? i.retailer + ' is a registered vendor, so this is always a BTW item \u2014 21% reclaimable, VAT charged on sale' : 'Margin scheme: bought from a private seller, VAT is due on the margin only',
+        vatChip: i.vatScheme === 'btw'
+          ? 'display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:7px;font-size:10.5px;font-weight:700;color:oklch(0.78 0.12 225);background:color-mix(in oklab,oklch(0.78 0.12 225) 14%,transparent);border:1px solid color-mix(in oklab,oklch(0.78 0.12 225) 30%,transparent)'
+          : 'display:inline-flex;align-items:center;gap:5px;padding:3px 8px;border-radius:7px;font-size:10.5px;font-weight:700;color:oklch(0.80 0.12 85);background:color-mix(in oklab,oklch(0.80 0.12 85) 14%,transparent);border:1px dashed color-mix(in oklab,oklch(0.80 0.12 85) 34%,transparent)',
         open: () => this.setState({ openItem: i.id }),
         toggle: (e) => { e.stopPropagation(); this.setState(s => ({ selected: s.selected.includes(i.id) ? s.selected.filter(x => x !== i.id) : s.selected.concat(i.id) })); },
         style: `${grid};height:${rowH};border-top:1px solid #1c2230;cursor:pointer;background:${sel ? 'rgba(91,140,255,.07)' : 'transparent'}`,
@@ -1011,7 +1356,7 @@ class Component extends DCLogic {
     const reviewItems = REVIEW.map((m, i) => ({
       ...m, recording: st.recording === i,
       record: () => this.setState({ recording: st.recording === i ? null : i }),
-      ignore: () => this.setState({ recording: null }),
+      ignore: () => { this.setState({ recording: null }); this.toast('Marked irrelevant', 'Similar mail from ' + m.from + ' will be ignored', 265); },
       fields: [{ label: 'EVENT TYPE', placeholder: 'Order shipped' }, { label: 'RETAILER', placeholder: 'Zalando' }, { label: 'ORDER REF', placeholder: '10029182' }, { label: 'AMOUNT', placeholder: '\u20ac0.00' }]
     }));
 
@@ -1078,7 +1423,7 @@ class Component extends DCLogic {
     const drawer = item ? {
       title: item.title, subtitle: item.brand + ' \u00b7 ' + item.size + ' \u00b7 ' + item.condition, sku: item.sku,
       statusLabel: STATUS[item.status].label, statusChip: chip(item.status), statusDot: sdot(item.status),
-      purchase: [{ label: 'Retailer', value: item.retailer }, { label: 'Ordered', value: item.purchasedAt }, { label: 'Price ex VAT', value: money(eur(item.purchasePrice.minor / 100 / 1.21)) }, { label: 'VAT 21%', value: money(eur(item.purchasePrice.minor / 100 * 0.1736)) }, { label: 'Total paid', value: money(item.purchasePrice) }],
+      purchase: [{ label: 'Retailer', value: item.retailer }, { label: 'VAT scheme', value: item.vatScheme === 'btw' ? 'BTW 21%' + (item.vatLocked ? ' (vendor)' : '') : 'Marge' }, { label: 'Ordered', value: item.purchasedAt }, { label: 'Price ex VAT', value: money(eur(item.purchasePrice.minor / 100 / 1.21)) }, { label: 'VAT 21%', value: money(eur(item.purchasePrice.minor / 100 * 0.1736)) }, { label: 'Total paid', value: money(item.purchasePrice) }],
       rightTitle: sale ? 'SALE & PROFIT' : 'HOLDING',
       right: sale
         ? [{ label: 'Marketplace', value: sale.marketplace }, { label: 'Gross', value: money(sale.gross) }, { label: 'Fees', value: money(sale.fees) }, { label: 'Payout', value: money(sale.payout) }, { label: 'Profit', value: money(sale.profit) + ' \u00b7 ' + sale.margin.toFixed(1) + '%' }]
@@ -1106,7 +1451,28 @@ class Component extends DCLogic {
     const isData = S === 'ready' || S === 'stale';
 
     return {
-      nav, sync, triggerSync: () => this.setState({ syncState: st.syncState === 'syncing' ? 'idle' : 'syncing' }),
+      nav, sync,
+      triggerSync: () => {
+        const next = st.syncState === 'syncing' ? 'idle' : 'syncing';
+        this.setState({ syncState: next });
+        this.toast(next === 'syncing' ? 'Sync started' : 'Sync finished', next === 'syncing' ? 'Checking 5 mailboxes for new mail' : '12 new records, 4 need review', next === 'syncing' ? 232 : 148);
+      },
+      alerts: st.alerts.map(a => ({
+        ...a,
+        go: () => { this.setState(s => ({ alertsOpen: false, screen: a.screen, alerts: s.alerts.map(x => x.id === a.id ? { ...x, unread: false } : x) })); },
+        dot: `width:7px;height:7px;border-radius:50%;background:oklch(0.74 0.15 ${a.hue});flex:none;margin-top:5px;opacity:${a.unread ? 1 : .4}`,
+        style: `display:flex;gap:10px;width:100%;text-align:left;border:0;border-top:1px solid #1c2230;background:${a.unread ? 'rgba(91,140,255,.05)' : 'transparent'};padding:10px 14px;cursor:pointer;font-family:inherit;color:inherit;align-items:flex-start`
+      })),
+      alertsOpen: st.alertsOpen,
+      toggleAlerts: () => this.setState({ alertsOpen: !st.alertsOpen }),
+      markAllRead: () => this.setState(s => ({ alerts: s.alerts.map(a => ({ ...a, unread: false })) })),
+      alertDot: st.alerts.some(a => a.unread),
+      alertDotStyle: `position:absolute;top:5px;right:7px;width:7px;height:7px;border-radius:50%;background:oklch(0.74 0.15 ${(st.alerts.find(a => a.unread) || { hue: 18 }).hue});box-shadow:0 0 0 2px #0b0d12`,
+      toasts: st.toasts.map(t => ({
+        ...t,
+        dot: `width:8px;height:8px;border-radius:50%;background:oklch(0.76 0.15 ${t.hue});flex:none;margin-top:4px`,
+        style: 'display:flex;gap:10px;align-items:flex-start;background:#161b26;border:1px solid #2b3346;border-radius:14px;padding:11px 14px;box-shadow:0 16px 40px rgba(0,0,0,.55);min-width:250px;max-width:320px;animation:toastIn .22s ease'
+      })),
       screenTitle: st.screen, screenSub: SUBS[st.screen],
       query: st.query, onQuery: (e) => this.setState({ query: e.target.value }),
       noop: () => {},
@@ -1124,8 +1490,16 @@ class Component extends DCLogic {
       showSettings: isData && st.screen === 'Settings',
       attentionFirst: st.attentionFirst, metricsFirst: !st.attentionFirst,
       attention, periods, d,
+      askValue: st.askValue, onAsk: (e) => this.setState({ askValue: e.target.value }),
+      nextPeriod: () => this.setState({ period: st.period === 'This month' ? 'This quarter' : 'This month' }),
+      toggleGranularity: () => this.setState({ granularity: st.granularity === 'Daily' ? 'Weekly' : 'Daily' }),
+      layoutLabel: st.attentionFirst ? 'Attention first' : 'Metrics first',
+      toggleLayout: () => this.setState({ attentionFirst: !st.attentionFirst }),
       goShipments: this.go('Shipments'), goInventory: this.go('Inventory'), goSettings: this.go('Settings'),
       statusFilters, invCols, rows,
+      vatFilters: [['all', 'All VAT', ITEMS.length, '#5b8cff'], ['btw', 'BTW 21%', ITEMS.filter(i => i.vatScheme === 'btw').length, 'oklch(0.78 0.12 225)'], ['marge', 'Marge', ITEMS.filter(i => i.vatScheme === 'marge').length, 'oklch(0.80 0.12 85)']]
+        .map(([key, label, count, color]) => ({ label, count, go: () => this.setState({ vatFilter: key }), style: fchip(st.vatFilter === key, color) })),
+      vatNote: 'Items from registered vendors (Bol.com, MediaMarkt, Nike.com and the rest) are always BTW \u2014 set automatically, marked \u25c6, and not overridable.',
       invHeadStyle: grid + ';height:34px;background:#171d2a;border-bottom:1px solid #1f2532',
       noMatch: rows.length === 0, totalItems: ITEMS.length,
       rowCountLabel: rows.length + ' of ' + ITEMS.length + ' items',
@@ -1148,7 +1522,7 @@ class Component extends DCLogic {
       salesSummary: SALES.length + ' sales \u00b7 2 loss-making',
       shipFilters, shipments, shipDetail, closeShip: () => this.setState({ openShip: null }),
       shipHeadStyle: shipGrid + ';padding:10px 15px;background:#171d2a;font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#6f7789',
-      reviewItems, reviewEmpty: false,
+      reviewItems, reviewEmpty: false, reviewCount: REVIEW.length, goReview: this.go('Review'),
       reportTabs, report, reportHeadStyle: repGrid + ';background:#171d2a', reportRowStyle: repGrid + ';border-top:1px solid #1c2230',
       accounts, providers, needsAppPassword,
       appPasswordNote: st.provider + ' rejects your normal account password over IMAP. Create an app-specific password in your ' + st.provider + ' security settings and paste that here instead.',
@@ -1161,6 +1535,24 @@ class Component extends DCLogic {
       vatFields: [{ label: 'Base reporting currency', value: 'EUR' }, { label: 'VAT registration country', value: 'NL' }, { label: 'Default VAT rate', value: '21%' }],
       notifications,
       parsers: [['Nike.com', 'from:nike.com subject:order', '412 parsed'], ['StockX', 'from:stockx.com', '288 parsed'], ['Vinted', 'from:vinted.nl subject:verkocht', '196 parsed'], ['PostNL', 'from:postnl.nl track&trace', '843 parsed'], ['SSENSE', 'from:ssense.com', '61 parsed']].map(p => ({ retailer: p[0], match: p[1], parsed: p[2] })),
+      windowVersion: 'v2.3.6',
+      windowOpen: st.win === 'maximized' || st.win === 'restored',
+      windowHidden: st.win === 'minimized' || st.win === 'closed',
+      hiddenLabel: st.win === 'closed' ? 'Resell Ops quit' : 'Resell Ops minimised',
+      shellStyle: st.win === 'restored'
+        ? 'flex:1;min-height:0;display:flex;overflow:hidden;gap:14px;padding:0 78px 40px;transition:padding .18s ease'
+        : 'flex:1;min-height:0;display:flex;overflow:hidden;gap:14px;padding:0 14px 14px;transition:padding .18s ease',
+      maxIconStyle: st.win === 'maximized'
+        ? 'display:block;width:9px;height:9px;border:1.5px solid currentColor;border-radius:2px;box-shadow:2px -2px 0 -0.5px #141824, 3px -3px 0 -1px currentColor'
+        : 'display:block;width:10px;height:10px;border:1.5px solid currentColor;border-radius:2px',
+      winMinimize: () => this.setState({ win: 'minimized' }),
+      winMaximize: () => this.setState({ win: st.win === 'maximized' ? 'restored' : 'maximized' }),
+      winClose: () => this.setState({ win: 'closed' }),
+      winRestore: () => this.setState({ win: 'maximized' }),
+      updater: this.updaterVals(),
+      updateAvailable: !st.updateDismissed,
+      openUpdater: () => this.setState({ updater: st.updater || 'available' }),
+      closeUpdater: () => this.setState({ updater: null }),
       drawer, closeDrawer: () => this.setState({ openItem: null, confirming: false }),
       confirming: st.confirming, askDelete: () => this.setState({ confirming: true }), cancelDelete: () => this.setState({ confirming: false })
     };

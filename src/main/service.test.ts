@@ -621,3 +621,48 @@ describe.skipIf(!allPresent)('dashboard reports the operation, not the plumbing'
     expect(dashboard.series.every((p) => p.out === 0 && p.in === 0)).toBe(true)
   })
 })
+
+describe.skipIf(!allPresent)('dashboard pipeline and capital', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('places every unit in exactly one pipeline stage', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    const inStages = dashboard.funnel.reduce((total, stage) => total + stage.units, 0)
+    // Cancelled and returned are reversals, so they sit outside the pipeline.
+    expect(inStages + dashboard.cancelled.units).toBe(dashboard.bought.units)
+  })
+
+  it('reports capital as the cost of what is actually held', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    // 11.99 + 3 x 53.99
+    expect(dashboard.stock.capital).toBe('€173.96')
+    expect(dashboard.stock.units).toBe(4)
+  })
+
+  it('spreads held stock across aging bands without losing any', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    const banded = dashboard.aging.reduce((total, band) => total + band.units, 0)
+    expect(banded).toBe(dashboard.stock.units)
+    expect(dashboard.aging.reduce((total, band) => total + band.minor, 0))
+      .toBe(dashboard.stock.capitalMinor)
+  })
+
+  it('refuses to state a profit when no sale has been recorded', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    // Claiming a profit of minus everything spent would read as a loss the
+    // business did not make; the screen says the sell side is missing instead.
+    expect(dashboard.profit.salesRecorded).toBe(0)
+    expect(dashboard.profit.channels).toEqual([])
+  })
+
+  it('gives six months of capital history for the chart', async () => {
+    await importAll()
+    expect(service.dashboard().months).toHaveLength(6)
+  })
+})

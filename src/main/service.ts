@@ -1058,17 +1058,97 @@ export class AppService {
     const sum = (sql: string, ...args: unknown[]): number =>
       (this.db.prepare(sql).get(...args) as { total: number | null }).total ?? 0
 
-    const held = ['incoming', 'in_stock', 'listed']
-    const heldList = held.map((s) => `'${s}'`).join(',')
+    const HELD = ["'incoming'", "'in_stock'", "'listed'"].join(',')
 
-    const series: { period: string; out: number; in: number }[] = []
+    // --- Pipeline: units at each stage, in the order they move through -----
+    const STAGES: { key: string; label: string; hue: number }[] = [
+      { key: 'incoming', label: 'Incoming', hue: 285 },
+      { key: 'in_stock', label: 'In stock', hue: 250 },
+      { key: 'listed', label: 'Listed', hue: 225 },
+      { key: 'sold', label: 'Sold', hue: 195 },
+      { key: 'shipped_to_buyer', label: 'Shipped', hue: 170 },
+      { key: 'delivered', label: 'Delivered', hue: 148 },
+    ]
+    const funnel = STAGES.map((stage) => ({
+      label: stage.label,
+      hue: stage.hue,
+      units: count('SELECT COUNT(*) AS n FROM items WHERE status = ?', stage.key),
+      value: formatMoney(money(
+        sum('SELECT SUM(cost_minor) AS total FROM items WHERE status = ?', stage.key), 'EUR',
+      )),
+    }))
+
+    // --- Profit: only real once a sale exists ------------------------------
+    const revenue = sum('SELECT SUM(payout_minor) AS total FROM sales')
+    const fees = sum('SELECT SUM(fees_minor) AS total FROM sales')
+    const soldCost = sum(
+      `SELECT SUM(i.cost_minor) AS total FROM items i
+       JOIN sales sa ON sa.item_id = i.id`,
+    )
+    const netProfit = revenue - soldCost
+    const salesRecorded = count('SELECT COUNT(*) AS n FROM sales')
+
+    const channels = (this.db.prepare(
+      `SELECT marketplace AS name, SUM(payout_minor) AS total
+       FROM sales GROUP BY marketplace ORDER BY total DESC LIMIT 4`,
+    ).all() as { name: string; total: number }[]).map((row) => ({
+      name: row.name,
+      value: formatMoney(money(row.total, 'EUR')),
+      minor: row.total,
+    }))
+
+    // --- Capital tied up, month by month -----------------------------------
+    const months: { label: string; capital: number }[] = []
     const now = new Date()
+    for (let index = 5; index >= 0; index -= 1) {
+      const point = new Date(now.getFullYear(), now.getMonth() - index + 1, 1)
+      const iso = point.toISOString()
+      months.push({
+        label: point.toLocaleString('en-GB', { month: 'short' }),
+        // Everything bought before this month that has not left stock: the
+        // running total of money sitting in goods.
+        capital: sum(
+          `SELECT SUM(cost_minor) AS total FROM items
+           WHERE purchased_at < ? AND status IN (${HELD})`,
+          iso,
+        ),
+      })
+    }
+
+    // --- Aging: how long stock has been sitting ----------------------------
+    const AGING: { bucket: string; from: number; to: number | null }[] = [
+      { bucket: '0-30', from: 0, to: 30 },
+      { bucket: '31-60', from: 31, to: 60 },
+      { bucket: '61-90', from: 61, to: 90 },
+      { bucket: '90+', from: 91, to: null },
+    ]
+    const today = Date.now()
+    const heldRows = this.db.prepare(
+      `SELECT cost_minor, purchased_at FROM items WHERE status IN (${HELD})`,
+    ).all() as { cost_minor: number; purchased_at: string | null }[]
+
+    const aging = AGING.map((band) => {
+      const inBand = heldRows.filter((row) => {
+        if (!row.purchased_at) return band.from === 0
+        const days = Math.floor((today - Date.parse(row.purchased_at)) / 86_400_000)
+        return days >= band.from && (band.to === null || days <= band.to)
+      })
+      return {
+        bucket: band.bucket,
+        units: inBand.length,
+        value: formatMoney(money(inBand.reduce((total, row) => total + row.cost_minor, 0), 'EUR')),
+        minor: inBand.reduce((total, row) => total + row.cost_minor, 0),
+        stalled: band.bucket === '90+',
+      }
+    })
+
+    // --- Money out and in, week by week ------------------------------------
+    const series: { period: string; out: number; in: number }[] = []
     for (let index = weeks - 1; index >= 0; index -= 1) {
       const end = new Date(now.getTime() - index * 7 * 86_400_000)
       const start = new Date(end.getTime() - 7 * 86_400_000)
       const from = start.toISOString()
       const to = end.toISOString()
-
       series.push({
         period: to.slice(5, 10),
         out: sum(
@@ -1078,11 +1158,15 @@ export class AppService {
         in:
           sum('SELECT SUM(payout_minor) AS total FROM sales WHERE sold_at >= ? AND sold_at < ?', from, to)
           + sum(
-            'SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NOT NULL AND received_at >= ? AND received_at < ?',
+            `SELECT SUM(amount_minor) AS total FROM refunds
+             WHERE received_at IS NOT NULL AND received_at >= ? AND received_at < ?`,
             from, to,
           ),
       })
     }
+
+    const owed = sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NULL')
+    const capitalMinor = sum(`SELECT SUM(cost_minor) AS total FROM items WHERE status IN (${HELD})`)
 
     return {
       bought: {
@@ -1092,32 +1176,41 @@ export class AppService {
       },
       inFlight: {
         units: count("SELECT COUNT(*) AS n FROM items WHERE status = 'incoming'"),
-        parcels: count("SELECT COUNT(*) AS n FROM shipments WHERE status NOT IN ('delivered')"),
+        parcels: count("SELECT COUNT(*) AS n FROM shipments WHERE status != 'delivered'"),
         awaitingCode: count('SELECT COUNT(*) AS n FROM shipments WHERE tracking_number IS NULL'),
       },
       stock: {
-        units: count(`SELECT COUNT(*) AS n FROM items WHERE status IN (${heldList})`),
-        capital: formatMoney(money(
-          sum(`SELECT SUM(cost_minor) AS total FROM items WHERE status IN (${heldList})`), 'EUR',
-        )),
+        units: count(`SELECT COUNT(*) AS n FROM items WHERE status IN (${HELD})`),
+        capital: formatMoney(money(capitalMinor, 'EUR')),
+        capitalMinor,
       },
       cancelled: {
         units: count("SELECT COUNT(*) AS n FROM items WHERE status = 'cancelled'"),
-        owed: formatMoney(money(
-          sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NULL'), 'EUR',
-        )),
-        owedMinor: sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NULL'),
+        owed: formatMoney(money(owed, 'EUR')),
+        owedMinor: owed,
+      },
+      profit: {
+        net: formatMoney(money(netProfit, 'EUR')),
+        netMinor: netProfit,
+        revenue: formatMoney(money(revenue, 'EUR')),
+        fees: formatMoney(money(fees, 'EUR')),
+        marginPercent: revenue > 0 ? Math.round((netProfit / revenue) * 1000) / 10 : 0,
+        salesRecorded,
+        channels,
       },
       money: {
         out: formatMoney(money(sum('SELECT SUM(total_minor) AS total FROM purchases'), 'EUR')),
         in: formatMoney(money(
-          sum('SELECT SUM(payout_minor) AS total FROM sales')
-          + sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NOT NULL'),
+          revenue + sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NOT NULL'),
           'EUR',
         )),
-        salesRecorded: count('SELECT COUNT(*) AS n FROM sales'),
+        salesRecorded,
       },
+      funnel,
+      months,
+      aging,
       series,
+      reviewCount: count("SELECT COUNT(*) AS n FROM messages WHERE parse_status = 'unrecognized'"),
     }
   }
 
@@ -1293,10 +1386,23 @@ export interface AycdStatusView {
 export interface DashboardView {
   bought: { orders: number; units: number; spend: string }
   inFlight: { units: number; parcels: number; awaitingCode: number }
-  stock: { units: number; capital: string }
+  stock: { units: number; capital: string; capitalMinor: number }
   cancelled: { units: number; owed: string; owedMinor: number }
+  profit: {
+    net: string
+    netMinor: number
+    revenue: string
+    fees: string
+    marginPercent: number
+    salesRecorded: number
+    channels: { name: string; value: string; minor: number }[]
+  }
   money: { out: string; in: string; salesRecorded: number }
+  funnel: { label: string; hue: number; units: number; value: string }[]
+  months: { label: string; capital: number }[]
+  aging: { bucket: string; units: number; value: string; minor: number; stalled: boolean }[]
   series: { period: string; out: number; in: number }[]
+  reviewCount: number
 }
 
 export interface SummaryView {

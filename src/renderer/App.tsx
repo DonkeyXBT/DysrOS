@@ -265,6 +265,7 @@ export function App() {
           {screen === 'Dashboard' && (
             <Dashboard
               onSync={syncNow}
+              onGo={(target) => setScreen(target)}
               dataVersion={dataVersion}
               hasMail={(summary?.messageCount ?? 0) > 0}
             />

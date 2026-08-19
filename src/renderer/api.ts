@@ -9,10 +9,19 @@ export interface ShipmentView {
 export interface DashboardView {
   bought: { orders: number; units: number; spend: string }
   inFlight: { units: number; parcels: number; awaitingCode: number }
-  stock: { units: number; capital: string }
+  stock: { units: number; capital: string; capitalMinor: number }
   cancelled: { units: number; owed: string; owedMinor: number }
+  profit: {
+    net: string; netMinor: number; revenue: string; fees: string
+    marginPercent: number; salesRecorded: number
+    channels: { name: string; value: string; minor: number }[]
+  }
   money: { out: string; in: string; salesRecorded: number }
+  funnel: { label: string; hue: number; units: number; value: string }[]
+  months: { label: string; capital: number }[]
+  aging: { bucket: string; units: number; value: string; minor: number; stalled: boolean }[]
   series: { period: string; out: number; in: number }[]
+  reviewCount: number
 }
 
 export interface ItemView {
