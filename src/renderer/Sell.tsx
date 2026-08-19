@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { api, type ItemView } from './api.js'
+import { api, type ItemView, type SaleView } from './api.js'
 
 /**
  * Recording a sale made away from any marketplace.
@@ -261,4 +261,163 @@ export function toMinor(text: string): number | null {
   const cleaned = text.trim().replace(/[€\s]/g, '').replace(',', '.')
   if (!/^\d+(\.\d{1,2})?$/.test(cleaned)) return null
   return Math.round(Number(cleaned) * 100)
+}
+
+/**
+ * Correcting a sale already recorded.
+ *
+ * The same arithmetic as recording one, over a sale that exists: a price
+ * agreed in a hurry is often written down wrong, and the BTW split follows
+ * from the price rather than being typed, so it is worked out again from
+ * whatever the price becomes.
+ */
+export function EditSaleDialog({
+  sale,
+  onClose,
+  onSaved,
+}: {
+  sale: SaleView
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const [amount, setAmount] = useState(() => (sale.grossMinor / 100).toFixed(2).replace('.', ','))
+  const [includesVat, setIncludesVat] = useState(sale.includedVat)
+  const [buyer, setBuyer] = useState(sale.buyer ?? '')
+  const [note, setNote] = useState(sale.note ?? '')
+  const [soldOn, setSoldOn] = useState(sale.soldAt.slice(0, 10))
+  const [saving, setSaving] = useState(false)
+
+  const amountMinor = toMinor(amount)
+  const preview = useMemo(() => {
+    if (amountMinor === null) return null
+    const gross = includesVat ? amountMinor : Math.round(amountMinor * 1.21)
+    const vat = Math.round((gross * 2100) / 12100)
+    return { gross, vat, profit: sale.costMinor === null ? null : gross - sale.costMinor }
+  }, [amountMinor, includesVat, sale.costMinor])
+
+  const save = async () => {
+    if (amountMinor === null) return
+    setSaving(true)
+    try {
+      await api.updateSale(sale.id, {
+        amountMinor,
+        includesVat,
+        buyer,
+        note,
+        soldAt: new Date(`${soldOn}T12:00:00`).toISOString(),
+      })
+      onSaved()
+      onClose()
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="modal-scrim" onClick={saving ? undefined : onClose}>
+      <div className="modal" style={{ width: 460 }} onClick={(event) => event.stopPropagation()}>
+        <div className="modal-chrome">
+          <span className="modal-pip" />
+          <span className="modal-pip" />
+          <span className="modal-pip" />
+          <span className="modal-chrome-title">Edit this sale</span>
+          <button className="modal-x" onClick={onClose} aria-label="Cancel">×</button>
+        </div>
+
+        <div className="modal-body">
+          <div className="modal-panel">
+            <span className="modal-panel-label">
+              UNIT{sale.cost ? ` · ${sale.cost} COST` : ' · BOUGHT ELSEWHERE'}
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.4 }}>
+              {sale.title}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+              <span className="modal-panel-label">PRICE</span>
+              <input
+                className="field-input"
+                value={amount}
+                inputMode="decimal"
+                autoFocus
+                onChange={(event) => setAmount(event.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, width: 150 }}>
+              <span className="modal-panel-label">SOLD ON</span>
+              <input
+                className="field-input"
+                type="date"
+                value={soldOn}
+                onChange={(event) => setSoldOn(event.target.value)}
+              />
+            </label>
+          </div>
+
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            <Toggle active={includesVat} onClick={() => setIncludesVat(true)}>
+              Price includes 21% BTW
+            </Toggle>
+            <Toggle active={!includesVat} onClick={() => setIncludesVat(false)}>
+              BTW comes on top
+            </Toggle>
+          </div>
+
+          <div style={{ display: 'flex', gap: 10 }}>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+              <span className="modal-panel-label">SOLD TO</span>
+              <input
+                className="field-input"
+                value={buyer}
+                placeholder="Name of the buyer"
+                onChange={(event) => setBuyer(event.target.value)}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1 }}>
+              <span className="modal-panel-label">NOTE</span>
+              <input
+                className="field-input"
+                value={note}
+                placeholder="optional"
+                onChange={(event) => setNote(event.target.value)}
+              />
+            </label>
+          </div>
+
+          {preview && (
+            <div className="modal-panel" style={{ gap: 5 }}>
+              <Line label="Received" value={preview.gross} strong />
+              {sale.costMinor !== null && (
+                <Line label="Cost of the unit" value={-sale.costMinor} muted />
+              )}
+              {preview.profit !== null && (
+                <Line label="Profit" value={preview.profit} strong accent />
+              )}
+              <Line label="BTW collected (21%)" value={preview.vat} muted />
+            </div>
+          )}
+
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center', paddingTop: 2 }}>
+            <button className="btn" style={{ padding: '9px 16px' }} onClick={onClose} disabled={saving}>
+              Cancel
+            </button>
+            <button
+              className="btn"
+              style={{
+                padding: '9px 16px', fontWeight: 700, border: 0,
+                background: 'var(--accent)', color: '#0b1020',
+                opacity: amountMinor === null ? .5 : 1,
+              }}
+              disabled={saving || amountMinor === null}
+              onClick={() => void save()}
+            >
+              {saving ? 'Saving…' : 'Save changes'}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }

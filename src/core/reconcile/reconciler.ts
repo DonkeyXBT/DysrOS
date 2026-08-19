@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { NL_VAT_BASIS_POINTS } from '../sell.js'
 import type { Db } from '../db/connection.js'
 import { EventRepo, type StoredEvent } from '../repos/events.js'
 import {
@@ -62,6 +63,10 @@ export class Reconciler {
         return this.applyCancellation(event, now)
       case 'delivered':
         return this.applyDelivery(event, now)
+      case 'sale':
+        return this.applySale(event, now)
+      case 'payout':
+        return this.applyPayout(event, now)
       default:
         // Nothing to do for this type yet, but it is not an error: mark it done
         // so it does not accumulate in the queue forever.
@@ -230,8 +235,8 @@ export class Reconciler {
     this.db.prepare(
       `INSERT INTO shipments
          (id, direction, carrier, tracking_number, tracking_url, status, purchase_id,
-          expected_delivery_at, delivery_window, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          expected_delivery_at, delivery_window, label_message_id, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          carrier = excluded.carrier,
          tracking_number = COALESCE(excluded.tracking_number, shipments.tracking_number),
@@ -249,7 +254,8 @@ export class Reconciler {
          expected_delivery_at = excluded.expected_delivery_at,
          -- A later mail that names no window must not erase the one already
          -- known: the courier still comes between those two times.
-         delivery_window = COALESCE(excluded.delivery_window, shipments.delivery_window)`,
+         delivery_window = COALESCE(excluded.delivery_window, shipments.delivery_window),
+         label_message_id = COALESCE(excluded.label_message_id, shipments.label_message_id)`,
     ).run(
       parcelId,
       (payload.direction as string) ?? 'inbound',
@@ -260,6 +266,9 @@ export class Reconciler {
       purchaseId,
       (payload.expectedDeliveryAt as string | null) ?? null,
       (payload.deliveryWindow as string | null) ?? null,
+      // The label is a PDF on this very mail, so the parcel remembers which
+      // mail to fetch it from rather than keeping a second copy of it.
+      payload.hasLabel ? event.messageId : null,
       now,
     )
 
@@ -376,12 +385,138 @@ export class Reconciler {
     return true
   }
 
+  /**
+   * A sale on a marketplace.
+   *
+   * The mail names the item and what the buyer paid; it says nothing about
+   * what the item cost, because the marketplace has no idea. Where the same
+   * article is sitting in stock it is matched and marked sold, which is what
+   * gives the sale a cost to be measured against; where it is not — a personal
+   * item, something bought before any of this was recorded — the sale stands
+   * on its own with revenue and no cost, and says so rather than inventing one.
+   */
+  private applySale(event: StoredEvent, now: string): boolean {
+    const payload = event.payload as Record<string, unknown>
+    const title = (payload.title as string | null) ?? null
+    const gross = Number(payload.grossMinor ?? payload.totalMinor ?? 0)
+    const saleId = digest(`${event.retailer}|${event.externalOrderId ?? normaliseTitle(title)}|${event.occurredAt}`)
+
+    if (this.isSuppressed('sale', saleId)) return true
+
+    const itemId = title ? this.findUnsoldItem(title) : null
+
+    this.db.prepare(
+      `INSERT INTO sales
+         (id, item_id, marketplace, external_order_id, buyer, title, price_included_vat,
+          sold_at, currency, gross_minor, vat_minor, vat_rate_bp, payout_minor, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         item_id = COALESCE(sales.item_id, excluded.item_id),
+         buyer = COALESCE(excluded.buyer, sales.buyer),
+         title = COALESCE(excluded.title, sales.title),
+         gross_minor = excluded.gross_minor,
+         payout_minor = CASE WHEN sales.payout_minor > 0 THEN sales.payout_minor
+                             ELSE excluded.payout_minor END`,
+    ).run(
+      saleId,
+      itemId,
+      (payload.channel as string) ?? event.retailer,
+      event.externalOrderId,
+      (payload.buyer as string | null) ?? null,
+      title,
+      event.occurredAt,
+      (payload.currency as string) ?? 'EUR',
+      gross,
+      // The marketplace states a price with VAT already in it, as a buyer pays.
+      Math.round((gross * NL_VAT_BASIS_POINTS) / (10_000 + NL_VAT_BASIS_POINTS)),
+      NL_VAT_BASIS_POINTS,
+      gross,
+      now,
+    )
+
+    if (itemId) {
+      this.db.prepare("UPDATE items SET status = 'sold' WHERE id = ?").run(itemId)
+    }
+    return true
+  }
+
+  /**
+   * The money landing, which is the sale's last word.
+   *
+   * It states what actually reached the balance after postage, which is the
+   * figure worth keeping — and it carries the transaction id, which the sale
+   * mail did not, so the sale gains its reference here.
+   */
+  private applyPayout(event: StoredEvent, now: string): boolean {
+    const payload = event.payload as Record<string, unknown>
+    const title = (payload.title as string | null) ?? null
+    const payout = Number(payload.payoutMinor ?? payload.totalMinor ?? 0)
+    const price = Number(payload.itemPriceMinor ?? payout)
+
+    const existing = event.externalOrderId
+      ? this.db.prepare(
+        'SELECT id FROM sales WHERE marketplace = ? AND external_order_id = ?',
+      ).get((payload.channel as string) ?? event.retailer, event.externalOrderId) as
+        { id: string } | undefined
+      : undefined
+
+    // Matched on the item where the sale mail carried no transaction id, which
+    // is how Vinted sends it: the id only appears once the order completes.
+    const byTitle = existing ?? (title
+      ? this.db.prepare(
+        `SELECT id FROM sales
+         WHERE marketplace = ? AND lower(trim(COALESCE(title, note))) = lower(trim(?))
+         ORDER BY sold_at DESC LIMIT 1`,
+      ).get((payload.channel as string) ?? event.retailer, title) as { id: string } | undefined
+      : undefined)
+
+    if (!byTitle) {
+      // The sale mail was never collected — the payout is still a sale, and
+      // recording it is better than dropping the money.
+      return this.applySale({
+        ...event,
+        payload: { ...payload, grossMinor: price },
+      }, now)
+    }
+
+    this.db.prepare(
+      `UPDATE sales
+       SET external_order_id = COALESCE(?, external_order_id),
+           payout_minor = ?,
+           fees_minor = ?,
+           gross_minor = CASE WHEN gross_minor > 0 THEN gross_minor ELSE ? END
+       WHERE id = ?`,
+    ).run(
+      event.externalOrderId,
+      payout,
+      Number(payload.postageMinor ?? 0),
+      price,
+      byTitle.id,
+    )
+    return true
+  }
+
+  /** A unit of the same article that is still in stock, if there is one. */
+  private findUnsoldItem(title: string): string | null {
+    const row = this.db.prepare(
+      `SELECT id FROM items
+       WHERE lower(trim(title)) = lower(trim(?)) AND status NOT IN ('sold', 'cancelled', 'returned')
+       ORDER BY purchased_at LIMIT 1`,
+    ).get(title) as { id: string } | undefined
+    return row?.id ?? null
+  }
+
   private findPurchaseId(retailer: string, externalOrderId: string): string | null {
     const row = this.db
       .prepare('SELECT id FROM purchases WHERE retailer = ? AND external_order_id = ?')
       .get(retailer, externalOrderId) as { id: string } | undefined
     return row?.id ?? null
   }
+}
+
+/** Titles compared with spacing and case ignored, as everywhere else. */
+function normaliseTitle(title: string | null): string {
+  return (title ?? '').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
 function digest(input: string): string {

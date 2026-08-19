@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { api, type SummaryView } from './api.js'
 import { Dashboard } from './screens/Dashboard.js'
 import { Shipments } from './screens/Shipments.js'
+import { Sales } from './screens/Sales.js'
 import { Purchases } from './screens/Purchases.js'
 import { Review } from './screens/Review.js'
 import { Settings } from './screens/Settings.js'
@@ -323,9 +324,7 @@ export function App() {
             />
           )}
           {screen === 'Reports' && <Reports dataVersion={dataVersion} />}
-          {screen === 'Sales' && (
-            <Placeholder screen={screen} />
-          )}
+          {screen === 'Sales' && <Sales query={query} dataVersion={dataVersion} />}
           </ErrorBoundary>
         </div>
         </main>

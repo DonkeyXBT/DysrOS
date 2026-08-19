@@ -6,6 +6,8 @@ export interface ShipmentView {
   lastMovementAt: string | null; expectedDeliveryAt: string | null
   deliveryWindow: string | null
   postalCode: string | null; city: string | null; dhlRedirectable: boolean
+  /** True when a marketplace attached a shipping label to its mail. */
+  hasLabel: boolean
   redirect: {
     outcome: string; message: string; servicePoint: string | null; attemptedAt: string | null
   } | null
@@ -21,6 +23,24 @@ export interface ActivityView {
   total: number | null
   startedAt: string
   endedAt: string | null
+}
+
+export interface SaleView {
+  id: string
+  itemId: string | null
+  title: string
+  imageUrl: string | null
+  buyer: string | null
+  note: string | null
+  soldAt: string
+  channel: string
+  retailer: string | null
+  orderRef: string | null
+  grossMinor: number; gross: string
+  vatMinor: number; vat: string
+  includedVat: boolean
+  costMinor: number | null; cost: string | null
+  profitMinor: number | null; profit: string | null
 }
 
 export interface RedirectReportView {
@@ -228,6 +248,14 @@ interface Api {
     buyer?: string | null; note?: string | null; soldAt?: string
   }): Promise<{ sold: number; grossMinor: number; profitMinor: number; vatMinor: number }>
   unsellItems(ids: string[]): Promise<number>
+  sales(): Promise<SaleView[]>
+  saveLabel(shipmentId: string): Promise<{ saved: boolean; path?: string; reason?: string }>
+  openLabel(shipmentId: string): Promise<{ opened: boolean; path?: string }>
+  updateSale(id: string, input: {
+    amountMinor?: number; includesVat?: boolean
+    buyer?: string | null; note?: string | null; soldAt?: string
+  }): Promise<SaleView | null>
+  deleteSale(id: string): Promise<boolean>
   vatPosition(): Promise<{
     rateBasisPoints: number; paidOnPurchases: string; collectedOnSales: string
     balance: string; balanceMinor: number

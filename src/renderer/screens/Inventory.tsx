@@ -9,9 +9,8 @@ import { groupByProduct, type ProductGroup } from './inventory-groups.js'
 import { SellDialog } from '../Sell.js'
 
 /** The design's column set: selection, thumbnail, then the item's facts. */
-const COLUMNS =
-  '26px 34px minmax(220px,2fr) 104px 96px 74px 84px 88px 88px 52px 96px'
-const MIN_WIDTH = 1010
+const COLUMNS = '26px 34px minmax(240px,2fr) 108px 104px 84px 92px 60px 110px'
+const MIN_WIDTH = 880
 
 const STATUS: Record<string, { label: string; hue: number; muted?: boolean }> = {
   incoming: { label: 'Incoming', hue: 285 },
@@ -30,7 +29,7 @@ function statusColour(status: string): string {
   return entry.muted ? 'oklch(0.60 0.015 265)' : `oklch(0.76 0.13 ${entry.hue})`
 }
 
-type SortKey = 'title' | 'status' | 'purchasedAt' | 'cost' | 'profit' | 'daysHeld'
+type SortKey = 'title' | 'status' | 'purchasedAt' | 'cost' | 'daysHeld'
 
 /**
  * The columns worth the width they take.
@@ -46,10 +45,8 @@ const HEADERS: { key: SortKey | null; label: string; right?: boolean }[] = [
   { key: null, label: 'Parcel' },
   { key: 'purchasedAt', label: 'Bought' },
   { key: 'cost', label: 'Cost', right: true },
-  { key: null, label: 'Sold for', right: true },
-  { key: 'profit', label: 'Profit', right: true },
   { key: 'daysHeld', label: 'Days', right: true },
-  { key: null, label: 'Buyer' },
+  { key: null, label: 'Location' },
 ]
 
 export function Inventory({
@@ -80,7 +77,9 @@ export function Inventory({
 
   useEffect(load, [dataVersion])
 
-  const all = useMemo(() => items ?? [], [items])
+  // Sold units belong to Sales. Keeping them here too made inventory a list
+  // of things you have and things you had, which answers neither question.
+  const all = useMemo(() => (items ?? []).filter((item) => item.status !== 'sold'), [items])
   const term = query.trim().toLowerCase()
 
   const filtered = useMemo(() => {
@@ -97,9 +96,6 @@ export function Inventory({
       const pick = (item: ItemView): string | number => {
         switch (sort.key) {
           case 'cost': return item.costMinor
-          // Unsold units sort below sold ones rather than as a zero profit,
-          // which would read as breaking even.
-          case 'profit': return item.profitMinor ?? Number.NEGATIVE_INFINITY
           case 'daysHeld': return item.daysHeld ?? -1
           case 'purchasedAt': return item.purchasedAt ?? ''
           case 'status': return item.status
@@ -400,22 +396,8 @@ export function Inventory({
 
                   <Cell mono>{item.purchasedAt?.slice(5, 10) ?? '—'}</Cell>
                   <Cell mono right>{item.cost}</Cell>
-                  <Cell mono right>{item.sold ?? '—'}</Cell>
-                  <div
-                    className="mono"
-                    style={{
-                      fontSize: 11, textAlign: 'right', whiteSpace: 'nowrap',
-                      overflow: 'hidden', textOverflow: 'ellipsis',
-                      color: item.profitMinor === null
-                        ? 'var(--text-ghost)'
-                        : item.profitMinor >= 0 ? 'var(--teal)' : 'var(--pink)',
-                    }}
-                    title={item.buyer ? `Sold to ${item.buyer}` : undefined}
-                  >
-                    {item.profit ?? '—'}
-                  </div>
                   <Cell mono right>{item.daysHeld ?? '—'}</Cell>
-                  <Cell>{item.buyer ?? item.location ?? '—'}</Cell>
+                  <Cell>{item.location ?? '—'}</Cell>
                 </div>
               )
             })}

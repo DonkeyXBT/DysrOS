@@ -404,3 +404,17 @@ export const SCHEMA_V11 = `
 ALTER TABLE notifications_sent ADD COLUMN subject_key TEXT;
 CREATE INDEX idx_notifications_subject ON notifications_sent(subject_key);
 `
+
+/**
+ * What a marketplace sale was, and where its label lives.
+ *
+ * A sale on a marketplace names the item itself — the goods may never have
+ * been bought through any mail this application has seen, so there is no stock
+ * row to take a title from. The shipping label, meanwhile, arrives as a PDF
+ * attached to a mail, and the mail is where it stays until someone asks to
+ * print it; the parcel only needs to remember which mail that was.
+ */
+export const SCHEMA_V12 = `
+ALTER TABLE sales ADD COLUMN title TEXT;
+ALTER TABLE shipments ADD COLUMN label_message_id TEXT;
+`

@@ -10,6 +10,12 @@ import type { NotificationInput, sendToDiscord } from '../core/notify/discord.js
 import type { Fetcher } from '../core/tracking/dhl-status.js'
 import type { WatcherClock } from '../core/aycd/watcher.js'
 
+const VINTED = [
+  'You’ve sold an item on Vinted.eml',
+  'Uniqlo balloon pants shipping label – use by 19 06 2026 17 53.eml',
+  'This order is completed.eml',
+] as const
+
 const FIXTURES = [
   'Bedankt voor je bestelling.eml',
   'Bedankt_voor_je_bestelling_0.eml',
@@ -1677,5 +1683,187 @@ describe.skipIf(!allPresent)('a sale that lost its unit is recovered', () => {
     expect(sold[0]!.status).toBe('sold')
     expect(sold[0]!.buyer).toBe('Twan')
     expect(reopened.dashboard().profit.netMinor).toBe(13000 - unit.costMinor)
+  })
+})
+
+describe.skipIf(!allPresent)('a sale can be corrected afterwards', () => {
+  async function sold() {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    const unit = service.listInventory()[0]!
+    service.sellItems([unit.id], { amountMinor: 7500, includesVat: true, buyer: 'Twan' })
+    return { unit, sale: service.listSales()[0]! }
+  }
+
+  it('lists what was sold, with what it fetched and earned', async () => {
+    const { unit } = await sold()
+
+    const sales = service.listSales()
+    expect(sales).toHaveLength(1)
+    expect(sales[0]).toMatchObject({
+      title: unit.title,
+      buyer: 'Twan',
+      grossMinor: 7500,
+      costMinor: unit.costMinor,
+      profitMinor: 7500 - unit.costMinor,
+      includedVat: true,
+      channel: 'offline',
+    })
+  })
+
+  it('takes a corrected price and works the BTW out again', async () => {
+    const { sale } = await sold()
+
+    const updated = service.updateSale(sale.id, { amountMinor: 9000 })!
+    expect(updated.grossMinor).toBe(9000)
+    // 9000 gross at 21% is 1562 of BTW, not the 1302 of the old price.
+    expect(updated.vatMinor).toBe(1562)
+    expect(updated.profitMinor).toBe(9000 - sale.costMinor!)
+  })
+
+  it('adds the BTW when the corrected price is quoted without it', async () => {
+    const { sale } = await sold()
+
+    const updated = service.updateSale(sale.id, { amountMinor: 10000, includesVat: false })!
+    expect(updated.grossMinor).toBe(12100)
+    expect(updated.includedVat).toBe(false)
+  })
+
+  it('changes the buyer, the note and the date without touching the price', async () => {
+    const { sale } = await sold()
+
+    const updated = service.updateSale(sale.id, {
+      buyer: 'Sanne', note: 'picked up', soldAt: '2026-08-01T12:00:00.000Z',
+    })!
+    expect(updated).toMatchObject({
+      buyer: 'Sanne', note: 'picked up', grossMinor: sale.grossMinor,
+    })
+    expect(updated.soldAt).toBe('2026-08-01T12:00:00.000Z')
+  })
+
+  it('leaves what was not mentioned alone', async () => {
+    const { sale } = await sold()
+    const updated = service.updateSale(sale.id, { amountMinor: 8000 })!
+    expect(updated.buyer).toBe('Twan')
+  })
+
+  it('corrects nothing for a sale that does not exist', async () => {
+    await sold()
+    expect(service.updateSale('no-such-sale', { amountMinor: 100 })).toBeNull()
+  })
+
+  it('undoes a sale, putting the unit back in stock', async () => {
+    const { unit, sale } = await sold()
+
+    expect(service.deleteSale(sale.id)).toBe(true)
+    expect(service.listSales()).toEqual([])
+
+    const after = service.listInventory().find((item) => item.id === unit.id)!
+    expect(after.status).toBe('in_stock')
+    expect(after.soldMinor).toBeNull()
+  })
+
+  it('says so when there is no such sale to undo', () => {
+    expect(service.deleteSale('no-such-sale')).toBe(false)
+  })
+})
+
+describe.skipIf(!VINTED.every((name) => existsSync(fixturePath(name))))('the Vinted selling process', () => {
+  async function importVinted() {
+    for (const name of VINTED) await service.importEml(fixturePath(name))
+  }
+
+  it('recognises every mail of the process', async () => {
+    for (const name of VINTED) {
+      const result = await service.importEml(fixturePath(name))
+      expect(result.parserId, name).not.toBeNull()
+    }
+    expect(service.listReviewQueue()).toHaveLength(0)
+  })
+
+  it('records the sale with its buyer and price', async () => {
+    await importVinted()
+
+    const sale = service.listSales().find((row) => row.title === 'Uniqlo balloon pants')!
+    expect(sale).toMatchObject({
+      buyer: 'florence2838',
+      grossMinor: 1500,
+      channel: 'vinted',
+    })
+    // Bought outside this application, so there is no cost to measure against
+    // and none is invented.
+    expect(sale.costMinor).toBeNull()
+    expect(sale.profitMinor).toBeNull()
+  })
+
+  it('gains the transaction reference when the order completes', async () => {
+    await importVinted()
+
+    // One sale, not one per mail: the completion is the same sale finishing.
+    const sales = service.listSales().filter((row) => row.title === 'Uniqlo balloon pants')
+    expect(sales).toHaveLength(1)
+    expect(sales[0]!.orderRef).toBe('20362272898')
+    expect(sales[0]!.buyer).toBe('florence2838')
+  })
+
+  it('records a completion whose sale mail was never collected', async () => {
+    // Only the completion, as happens when a mailbox is connected mid-flow.
+    await service.importEml(fixturePath('This order is completed (2).eml'))
+
+    const sale = service.listSales()[0]!
+    expect(sale).toMatchObject({
+      title: 'Gosha Rubchinskiy t shirt',
+      grossMinor: 8000,
+      orderRef: '19885219761',
+    })
+  })
+
+  it('records the parcel going out, with the barcode Vinted printed', async () => {
+    await importVinted()
+
+    const parcel = service.listShipments()[0]!
+    expect(parcel).toMatchObject({
+      direction: 'outbound',
+      carrier: 'mondial relay',
+      trackingNumber: '83321021',
+      hasLabel: true,
+    })
+  })
+
+  it('hands back the label that was attached to the mail', async () => {
+    await importVinted()
+    const parcel = service.listShipments()[0]!
+
+    const label = await service.labelFor(parcel.id)
+    expect(label).not.toBeNull()
+    expect(label!.name).toMatch(/\.pdf$/i)
+    // A real PDF, not a placeholder.
+    expect(label!.content.subarray(0, 4).toString()).toBe('%PDF')
+  })
+
+  it('has no label to hand back for a parcel that never had one', async () => {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    const parcel = service.listShipments()[0]!
+    expect(await service.labelFor(parcel.id)).toBeNull()
+  })
+
+  it('does not count a sale with no cost basis as profit', async () => {
+    await importVinted()
+
+    const dashboard = service.dashboard()
+    expect(dashboard.profit.uncosted).toBeGreaterThan(0)
+    // Revenue is real; profit without a cost behind it is not.
+    expect(dashboard.profit.netMinor).toBe(0)
+  })
+
+  it('matches a Vinted sale to stock when the same article is held', async () => {
+    await service.importEml(fixturePath('Bedankt_voor_je_bestelling_0.eml'))
+    const held = service.listInventory()[0]!
+
+    // A sale of exactly what is in stock: this one does have a cost.
+    service.sellItems([held.id], { amountMinor: 9000, includesVat: true, buyer: 'Someone' })
+
+    const sale = service.listSales()[0]!
+    expect(sale.costMinor).toBe(held.costMinor)
+    expect(sale.profitMinor).toBe(9000 - held.costMinor)
   })
 })
