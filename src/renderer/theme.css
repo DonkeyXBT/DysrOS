@@ -676,26 +676,21 @@ a:hover { color: var(--accent-bright); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 
 /* Settings uses the whole page rather than a narrow column down the middle.
-   Columns rather than a grid, because these panels have nothing to do with
-   each other and their natural heights differ: a grid ties each pair to the
-   taller of the two and leaves the shorter one padded with dead space. Here
-   each panel is exactly as tall as its contents, the column count follows the
-   width, and mailboxes span the lot. */
+   A grid, with every panel starting at the top of its row rather than being
+   stretched to match its neighbour — that stretching was what made short
+   panels look padded out. Columns were tried instead and were worse: a panel
+   taller than the column gets sliced in half and its tail appears beside it.
+   A grid cell can do neither. */
 .settings-grid {
-  display: block;
-  column-width: 430px;
-  column-count: 2;
-  column-gap: 13px;
-  overflow-y: auto;
-  overflow-x: hidden;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  align-items: start;
   align-content: start;
+  gap: 13px;
+  overflow-y: auto;
 }
-.settings-grid > * {
-  break-inside: avoid;
-  margin: 0 0 13px;
-}
-.settings-grid > section { margin: 0 0 13px; }
-.settings-wide { column-span: all; }
+.settings-grid > section { margin: 0; }
+.settings-wide { grid-column: 1 / -1; }
 
 /* A tracking code that is also the way to the carrier's page. */
 .track-link {
