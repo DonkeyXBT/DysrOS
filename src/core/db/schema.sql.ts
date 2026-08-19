@@ -339,3 +339,34 @@ CREATE UNIQUE INDEX idx_sales_external
   ON sales(marketplace, external_order_id) WHERE external_order_id IS NOT NULL;
 CREATE INDEX idx_sales_item ON sales(item_id);
 `
+
+/**
+ * The delivery window, kept on the parcel rather than on one of its mails.
+ *
+ * "Between 17:00 and 19:00" arrives in the out-for-delivery mail, which is not
+ * the mail that created the parcel's row: when the two are recognised as one
+ * parcel the later row is folded away, and with it went the only copy of the
+ * window. Facts about a parcel belong on the parcel.
+ */
+export const SCHEMA_V8 = `
+ALTER TABLE shipments ADD COLUMN delivery_window TEXT;
+`
+
+/**
+ * Which mails were found to describe a parcel already recorded.
+ *
+ * Two mails are known to be one parcel only once both resolve to the same
+ * barcode — a fact learned over the network, at some cost, and then thrown
+ * away on the next rebuild, which brought every duplicate row back until the
+ * network was asked all over again. Remembering the pairing keeps a parcel a
+ * parcel: the mail is applied to the row it belongs to instead of making a new
+ * one.
+ */
+export const SCHEMA_V9 = `
+CREATE TABLE parcel_merges (
+  event_id        TEXT PRIMARY KEY,
+  into_id         TEXT NOT NULL,
+  tracking_number TEXT,
+  created_at      TEXT NOT NULL
+);
+`

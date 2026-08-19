@@ -220,7 +220,9 @@ describe.skipIf(!allPresent)('the courier is out with it', () => {
     expect(event!.type).toBe('shipped')
     expect(event!.externalOrderId).toBe('C000D3LPPH')
     expect(event!.payload).toMatchObject({
-      carrier: 'dhl',
+      // The template names no carrier, and guessing one was wrong more often
+      // than right: the parcel this belongs to already knows its carrier.
+      carrier: null,
       shipmentStatus: 'out_for_delivery',
       outForDelivery: true,
       title: 'Pokémon TCG - Ascended Heroes Booster Bundle',

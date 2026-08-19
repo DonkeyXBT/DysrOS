@@ -79,9 +79,14 @@ export function classifyShipment(
   // arrives today, usually with the delivery window in the body. That is worth
   // saying plainly rather than filing under "in transit" with everything else.
   if (/bezorger is onderweg/.test(subject) || /bezorger is onderweg/.test(body)) {
+    // This template names no carrier at all. Guessing DHL was wrong more often
+    // than right — a real mailbox showed these parcels going out with PostNL —
+    // and a confident wrong carrier is worse than none: the parcel takes the
+    // carrier of the announcement it belongs to, or of the barcode it resolves
+    // to.
     return {
       status: 'out_for_delivery',
-      carrier: carrierFromText(body) ?? 'dhl',
+      carrier: carrierFromText(body),
       inTransit: true,
     }
   }

@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto'
 import type { Db } from '../db/connection.js'
 import { EventRepo, type StoredEvent } from '../repos/events.js'
-import { findParcel, mergeInto } from './shipment-merge.js'
+import {
+  findParcel, mergedInto, mergeInto, rememberMerge, soleParcelOfOrder,
+} from './shipment-merge.js'
 
 /**
  * Turns parsed events into the entities the application reasons about:
@@ -161,6 +163,50 @@ export class Reconciler {
       ? this.findPurchaseId(event.retailer, event.externalOrderId)
       : null
 
+    // This mail may already be known to describe a parcel another mail
+    // recorded — learned when both resolved to the same barcode, at the cost of
+    // a network round trip. Writing it to that parcel is what stops the
+    // duplicate coming back every time the mail is read again.
+    //
+    // The parcel's row is written under the shared id whichever mail is
+    // applied first, so neither has to wait for the other.
+    const parcelId = mergedInto(this.db, event.id) ?? event.id
+    if (parcelId !== event.id && this.db.prepare('SELECT 1 FROM shipments WHERE id = ?').get(parcelId)) {
+      mergeInto(this.db, parcelId, {
+        status: shipmentStatus(payload),
+        purchaseId,
+        trackingUrl: (payload.trackingUrl as string | null) ?? null,
+        expectedDeliveryAt: (payload.expectedDeliveryAt as string | null) ?? null,
+        deliveryWindow: (payload.deliveryWindow as string | null) ?? null,
+      })
+      return true
+    }
+
+    // The courier being out with a parcel is news about a parcel already
+    // announced, never the announcement itself. Where the order has just one
+    // parcel with that carrier, this mail belongs to it.
+    if (
+      parcelId === event.id
+      && payload.shipmentStatus === 'out_for_delivery'
+      && !payload.trackingNumber
+      && event.externalOrderId
+    ) {
+      // Matched on the order alone: this template names no carrier, so the
+      // parcel's own is the one to trust.
+      const sole = soleParcelOfOrder(this.db, event.retailer, event.externalOrderId, event.id)
+      if (sole) {
+        mergeInto(this.db, sole, {
+          status: shipmentStatus(payload),
+          purchaseId,
+          trackingUrl: (payload.trackingUrl as string | null) ?? null,
+          expectedDeliveryAt: (payload.expectedDeliveryAt as string | null) ?? null,
+          deliveryWindow: (payload.deliveryWindow as string | null) ?? null,
+        })
+        rememberMerge(this.db, event.id, sole)
+        return true
+      }
+    }
+
     // Mail carrying a barcode another mail already recorded describes the same
     // parcel, not a new one. It updates that parcel instead of inserting a
     // second row the unique index would refuse.
@@ -173,6 +219,7 @@ export class Reconciler {
           purchaseId,
           trackingUrl: (payload.trackingUrl as string | null) ?? null,
           expectedDeliveryAt: (payload.expectedDeliveryAt as string | null) ?? null,
+          deliveryWindow: (payload.deliveryWindow as string | null) ?? null,
         })
         return true
       }
@@ -183,17 +230,28 @@ export class Reconciler {
     this.db.prepare(
       `INSERT INTO shipments
          (id, direction, carrier, tracking_number, tracking_url, status, purchase_id,
-          expected_delivery_at, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          expected_delivery_at, delivery_window, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          carrier = excluded.carrier,
          tracking_number = COALESCE(excluded.tracking_number, shipments.tracking_number),
          tracking_url = COALESCE(excluded.tracking_url, shipments.tracking_url),
-         status = excluded.status,
+         -- A parcel never goes backwards: a handover mail applied after an
+         -- out-for-delivery mail must not put it back on the van.
+         status = CASE
+           WHEN shipments.status = 'delivered' THEN 'delivered'
+           WHEN shipments.status = 'out_for_delivery'
+             AND excluded.status IN ('pending', 'in_transit') THEN 'out_for_delivery'
+           WHEN shipments.status = 'in_transit' AND excluded.status = 'pending' THEN 'in_transit'
+           ELSE excluded.status
+         END,
          purchase_id = COALESCE(excluded.purchase_id, shipments.purchase_id),
-         expected_delivery_at = excluded.expected_delivery_at`,
+         expected_delivery_at = excluded.expected_delivery_at,
+         -- A later mail that names no window must not erase the one already
+         -- known: the courier still comes between those two times.
+         delivery_window = COALESCE(excluded.delivery_window, shipments.delivery_window)`,
     ).run(
-      event.id,
+      parcelId,
       (payload.direction as string) ?? 'inbound',
       (payload.carrier as string) ?? 'unknown',
       (payload.trackingNumber as string | null) ?? null,
@@ -201,6 +259,7 @@ export class Reconciler {
       shipmentStatus(payload),
       purchaseId,
       (payload.expectedDeliveryAt as string | null) ?? null,
+      (payload.deliveryWindow as string | null) ?? null,
       now,
     )
 
