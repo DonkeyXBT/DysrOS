@@ -579,7 +579,19 @@ export class AppService {
                 WHERE r.purchase_id = p.id AND r.received_at IS NULL) AS refund_outstanding,
               (SELECT s.carrier FROM shipments s WHERE s.purchase_id = p.id LIMIT 1) AS carrier,
               (SELECT s.tracking_number FROM shipments s WHERE s.purchase_id = p.id LIMIT 1) AS tracking_number,
-              (SELECT s.status FROM shipments s WHERE s.purchase_id = p.id LIMIT 1) AS shipment_status
+              (SELECT s.status FROM shipments s WHERE s.purchase_id = p.id LIMIT 1) AS shipment_status,
+              -- The mailbox the order arrived in. With more than one connected
+              -- it is the difference between two accounts buying the same
+              -- thing, and it is the mail this row was built from.
+              (SELECT a.email FROM events e
+                 JOIN messages m ON m.id = e.message_id
+                 JOIN accounts a ON a.id = m.account_id
+                WHERE e.retailer = p.retailer AND e.external_order_id = p.external_order_id
+                ORDER BY e.occurred_at LIMIT 1) AS mailbox,
+              (SELECT m.subject FROM events e
+                 JOIN messages m ON m.id = e.message_id
+                WHERE e.retailer = p.retailer AND e.external_order_id = p.external_order_id
+                ORDER BY e.occurred_at LIMIT 1) AS mail_subject
        FROM purchases p
        ORDER BY p.ordered_at DESC`,
     ).all() as Record<string, unknown>[]
@@ -595,6 +607,8 @@ export class AppService {
         reference: (row.external_order_id as string | null) ?? null,
         orderedAt: row.ordered_at as string,
         title: (row.title as string | null) ?? null,
+        mailbox: (row.mailbox as string | null) ?? null,
+        mailSubject: (row.mail_subject as string | null) ?? null,
         quantity: (row.item_count as number) || 1,
         unit: formatMoney(money((row.unit_minor as number) ?? 0, currency)),
         shipping: formatMoney(money(row.shipping_minor as number, currency)),
@@ -622,6 +636,8 @@ export class AppService {
         reference: c.reference,
         orderedAt: c.occurredAt,
         title: c.title,
+        mailbox: c.mailbox,
+        mailSubject: c.mailSubject,
         quantity: 1,
         // bol.com states no amount in a cancellation, so there is nothing
         // honest to put in these columns.
@@ -638,6 +654,15 @@ export class AppService {
   }
 
   listCancellations(): CancellationView[] {
+    const mailboxes = new Map(
+      (this.db.prepare(
+        `SELECT e.id, a.email, m.subject FROM events e
+           JOIN messages m ON m.id = e.message_id
+           JOIN accounts a ON a.id = m.account_id`,
+      ).all() as { id: string; email: string; subject: string }[])
+        .map((row) => [row.id, row]),
+    )
+
     return this.allEvents()
       .filter((event) => event.type === 'cancelled')
       .map((event) => ({
@@ -646,6 +671,8 @@ export class AppService {
         reference: event.externalOrderId,
         occurredAt: event.occurredAt,
         title: (event.payload.title as string | null) ?? null,
+        mailbox: mailboxes.get(event.id)?.email ?? null,
+        mailSubject: mailboxes.get(event.id)?.subject ?? null,
         refundExpected: Boolean(event.payload.refundExpected),
       }))
   }
@@ -2343,6 +2370,9 @@ export interface PurchaseView {
   reference: string | null
   orderedAt: string
   title: string | null
+  /** The mailbox this order's mail arrived in, and what that mail said. */
+  mailbox: string | null
+  mailSubject: string | null
   quantity: number
   unit: string
   shipping: string
@@ -2363,6 +2393,9 @@ export interface CancellationView {
   reference: string | null
   occurredAt: string
   title: string | null
+  /** The mailbox the cancellation arrived in, and what that mail was called. */
+  mailbox: string | null
+  mailSubject: string | null
   refundExpected: boolean
 }
 

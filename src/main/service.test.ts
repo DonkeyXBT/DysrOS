@@ -1867,3 +1867,23 @@ describe.skipIf(!VINTED.every((name) => existsSync(fixturePath(name))))('the Vin
     expect(sale.profitMinor).toBe(9000 - held.costMinor)
   })
 })
+
+describe.skipIf(!allPresent)('an order knows which mailbox it came in on', () => {
+  it('names the mailbox that received the order mail', async () => {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+
+    const purchase = service.listPurchases().find((row) => row.kind === 'buy')!
+    // Files dropped in the folder belong to the local import account; a real
+    // mailbox names itself here.
+    expect(purchase.mailbox).toBe('local@import')
+    expect(purchase.mailSubject).toContain('bestelling')
+  })
+
+  it('names it for a cancellation with no order behind it too', async () => {
+    await service.importEml(fixturePath('Je_artikel_is_geannuleerd_0.eml'))
+
+    const cancel = service.listPurchases().find((row) => row.kind === 'cancel')!
+    expect(cancel.mailbox).toBe('local@import')
+    expect(cancel.mailSubject).toBeTruthy()
+  })
+})

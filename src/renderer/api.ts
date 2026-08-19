@@ -91,6 +91,8 @@ export interface ItemView {
 }
 
 export interface PurchaseView {
+  mailbox: string | null
+  mailSubject: string | null
   id: string; kind: 'buy' | 'cancel'; retailer: string; reference: string | null; orderedAt: string
   title: string | null; quantity: number; unit: string; shipping: string
   total: string; totalMinor: number; totalsConsistent: boolean; status: string
@@ -98,6 +100,8 @@ export interface PurchaseView {
   carrier?: string | null; trackingNumber?: string | null; shipmentStatus?: string | null
 }
 export interface CancellationView {
+  mailbox: string | null
+  mailSubject: string | null
   id: string; retailer: string; reference: string | null
   occurredAt: string; title: string | null; refundExpected: boolean
 }
