@@ -463,6 +463,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('summary', () => service.summary())
   ipcMain.handle('shipments', () => service.listShipments())
+  ipcMain.handle('dashboard', () => service.dashboard())
   ipcMain.handle('inventory', () => service.listInventory())
   ipcMain.handle('purchases', () => service.listPurchases())
   ipcMain.handle('cancellations', () => service.listCancellations())

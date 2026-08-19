@@ -262,7 +262,13 @@ export function App() {
         <div className="content">
           {/* Keyed by screen so moving to another screen clears a failed one. */}
           <ErrorBoundary area={screen} key={screen} onReset={() => void refresh()}>
-          {screen === 'Dashboard' && <Dashboard summary={summary} onSync={syncNow} />}
+          {screen === 'Dashboard' && (
+            <Dashboard
+              onSync={syncNow}
+              dataVersion={dataVersion}
+              hasMail={(summary?.messageCount ?? 0) > 0}
+            />
+          )}
           {screen === 'Inventory' && <Inventory query={query} dataVersion={dataVersion} />}
           {screen === 'Shipments' && <Shipments query={query} dataVersion={dataVersion} />}
           {screen === 'Purchases' && <Purchases query={query} dataVersion={dataVersion} />}

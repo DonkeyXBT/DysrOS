@@ -6,6 +6,15 @@ export interface ShipmentView {
   postalCode: string | null; city: string | null; dhlRedirectable: boolean
   linkedToPurchase: boolean
 }
+export interface DashboardView {
+  bought: { orders: number; units: number; spend: string }
+  inFlight: { units: number; parcels: number; awaitingCode: number }
+  stock: { units: number; capital: string }
+  cancelled: { units: number; owed: string; owedMinor: number }
+  money: { out: string; in: string; salesRecorded: number }
+  series: { period: string; out: number; in: number }[]
+}
+
 export interface ItemView {
   id: string; title: string; brand: string | null; sku: string | null
   size: string | null; condition: string; status: string
@@ -94,6 +103,7 @@ export interface SummaryView {
 interface Api {
   summary(): Promise<SummaryView>
   shipments(): Promise<ShipmentView[]>
+  dashboard(): Promise<DashboardView>
   inventory(): Promise<ItemView[]>
   purchases(): Promise<PurchaseView[]>
   cancellations(): Promise<CancellationView[]>

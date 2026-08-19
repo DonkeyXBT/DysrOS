@@ -1044,6 +1044,83 @@ export class AppService {
     this.reconciler.run(now)
   }
 
+  /**
+   * What the operation is doing, rather than what the plumbing is doing.
+   *
+   * Message and event counts say nothing about the business; how much was
+   * bought, what is still coming, and where the money went does. Sales are
+   * included in the money-in series even though no marketplace parser exists
+   * yet, so the shape does not change when one is added.
+   */
+  dashboard(weeks = 12): DashboardView {
+    const count = (sql: string, ...args: unknown[]): number =>
+      (this.db.prepare(sql).get(...args) as { n: number }).n
+    const sum = (sql: string, ...args: unknown[]): number =>
+      (this.db.prepare(sql).get(...args) as { total: number | null }).total ?? 0
+
+    const held = ['incoming', 'in_stock', 'listed']
+    const heldList = held.map((s) => `'${s}'`).join(',')
+
+    const series: { period: string; out: number; in: number }[] = []
+    const now = new Date()
+    for (let index = weeks - 1; index >= 0; index -= 1) {
+      const end = new Date(now.getTime() - index * 7 * 86_400_000)
+      const start = new Date(end.getTime() - 7 * 86_400_000)
+      const from = start.toISOString()
+      const to = end.toISOString()
+
+      series.push({
+        period: to.slice(5, 10),
+        out: sum(
+          'SELECT SUM(total_minor) AS total FROM purchases WHERE ordered_at >= ? AND ordered_at < ?',
+          from, to,
+        ),
+        in:
+          sum('SELECT SUM(payout_minor) AS total FROM sales WHERE sold_at >= ? AND sold_at < ?', from, to)
+          + sum(
+            'SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NOT NULL AND received_at >= ? AND received_at < ?',
+            from, to,
+          ),
+      })
+    }
+
+    return {
+      bought: {
+        orders: count("SELECT COUNT(*) AS n FROM purchases WHERE status != 'cancelled'"),
+        units: count('SELECT COUNT(*) AS n FROM items'),
+        spend: formatMoney(money(sum('SELECT SUM(total_minor) AS total FROM purchases'), 'EUR')),
+      },
+      inFlight: {
+        units: count("SELECT COUNT(*) AS n FROM items WHERE status = 'incoming'"),
+        parcels: count("SELECT COUNT(*) AS n FROM shipments WHERE status NOT IN ('delivered')"),
+        awaitingCode: count('SELECT COUNT(*) AS n FROM shipments WHERE tracking_number IS NULL'),
+      },
+      stock: {
+        units: count(`SELECT COUNT(*) AS n FROM items WHERE status IN (${heldList})`),
+        capital: formatMoney(money(
+          sum(`SELECT SUM(cost_minor) AS total FROM items WHERE status IN (${heldList})`), 'EUR',
+        )),
+      },
+      cancelled: {
+        units: count("SELECT COUNT(*) AS n FROM items WHERE status = 'cancelled'"),
+        owed: formatMoney(money(
+          sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NULL'), 'EUR',
+        )),
+        owedMinor: sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NULL'),
+      },
+      money: {
+        out: formatMoney(money(sum('SELECT SUM(total_minor) AS total FROM purchases'), 'EUR')),
+        in: formatMoney(money(
+          sum('SELECT SUM(payout_minor) AS total FROM sales')
+          + sum('SELECT SUM(amount_minor) AS total FROM refunds WHERE received_at IS NOT NULL'),
+          'EUR',
+        )),
+        salesRecorded: count('SELECT COUNT(*) AS n FROM sales'),
+      },
+      series,
+    }
+  }
+
   summary(): SummaryView {
     const purchases = this.listPurchases()
     const spend = purchases.reduce((sum, purchase) => sum + purchase.totalMinor, 0)
@@ -1211,6 +1288,15 @@ export interface AycdStatusView {
   events: number
   lastPollAt: string | null
   lastError: string | null
+}
+
+export interface DashboardView {
+  bought: { orders: number; units: number; spend: string }
+  inFlight: { units: number; parcels: number; awaitingCode: number }
+  stock: { units: number; capital: string }
+  cancelled: { units: number; owed: string; owedMinor: number }
+  money: { out: string; in: string; salesRecorded: number }
+  series: { period: string; out: number; in: number }[]
 }
 
 export interface SummaryView {
