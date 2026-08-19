@@ -90,7 +90,14 @@ export function Settings({
       <section className="section" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         <div className="section-head" style={{ marginBottom: 0 }}>
           <h2>Maintenance</h2>
-          <span className="section-note">when a parser has been corrected</span>
+          <span className="section-note">when something needs re-reading</span>
+          <button
+            className="btn"
+            style={{ marginLeft: 'auto', padding: '4px 11px', fontSize: 11 }}
+            onClick={onOpenLogs}
+          >
+            Open logs
+          </button>
         </div>
 
         <div style={{ display: 'flex', gap: 9, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -184,17 +191,6 @@ export function Settings({
         </div>
       </section>
 
-      <div
-        className="settings-wide"
-        style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 4, paddingBottom: 6 }}
-      >
-        <span style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
-          Something gone wrong? Errors and crash reports are kept.
-        </span>
-        <button className="btn" onClick={onOpenLogs} style={{ padding: '4px 11px', fontSize: 11 }}>
-          Open logs
-        </button>
-      </div>
     </div>
   )
 }

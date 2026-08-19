@@ -122,6 +122,8 @@ export function Accounts({
           </div>
         )}
 
+        <Lookback disabled={syncing} />
+
         {syncing && (
           <div style={{ fontSize: 11.5, color: 'var(--accent-soft)', paddingLeft: 2 }}>
             Syncing in the background. You can leave this screen; it keeps going.
@@ -130,8 +132,8 @@ export function Accounts({
 
         {accounts.length === 0 && !adding && (
           <div style={{ fontSize: 12, color: 'var(--text-dim)', lineHeight: 1.6 }}>
-            No mailbox connected yet. Add one and the app pulls order, shipping and cancellation
-            mail by itself — nothing needs to be exported or dropped into a folder.
+            No mailbox connected yet. Add one and order, shipping and cancellation mail is read
+            by itself — nothing needs exporting or dropping into a folder.
           </div>
         )}
 
@@ -309,5 +311,98 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
       </span>
       {children}
     </label>
+  )
+}
+
+/** Spans offered as choices, plus whatever number someone types. */
+const SPANS = [7, 14, 30, 90, 365]
+
+/**
+ * How far back a first sync of a mailbox reaches.
+ *
+ * A week by default, because a busy mailbox holds thousands of messages a
+ * month and a first run that grinds through a year of them reads as broken.
+ * Someone who has just connected a mailbox and wants their whole history back
+ * can say so, and reaching further asks the mailboxes again rather than
+ * waiting for new mail to arrive.
+ */
+function Lookback({ disabled }: { disabled: boolean }) {
+  const [days, setDays] = useState<number | null>(null)
+  const [custom, setCustom] = useState('')
+  const [note, setNote] = useState<string | null>(null)
+
+  useEffect(() => {
+    void api.syncLookback().then(setDays)
+  }, [])
+
+  if (days === null) return null
+
+  const apply = async (wanted: number) => {
+    const applied = await api.setSyncLookback(wanted)
+    setDays(applied)
+    setCustom('')
+    setNote(
+      applied > days
+        ? `Reaching back ${applied} days. The next sync collects what it can still see.`
+        : `Reaching back ${applied} days from now on. Nothing already collected is removed.`,
+    )
+  }
+
+  return (
+    <div
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap',
+        padding: '9px 11px', borderRadius: 14,
+        border: '1px solid var(--border)', background: 'var(--sunken)',
+      }}
+    >
+      <span className="modal-panel-label">HOW FAR BACK TO COLLECT</span>
+
+      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+        {SPANS.map((span) => (
+          <button
+            key={span}
+            className="btn"
+            disabled={disabled}
+            onClick={() => void apply(span)}
+            style={days === span
+              ? { background: '#242c3e', color: 'var(--text)', borderColor: '#3a4a6a' }
+              : undefined}
+          >
+            {span === 365 ? 'A year' : `${span} days`}
+          </button>
+        ))}
+      </div>
+
+      <input
+        className="field-input"
+        style={{ width: 84, padding: '5px 9px', fontSize: 11.5 }}
+        value={custom}
+        inputMode="numeric"
+        placeholder={`${days} days`}
+        disabled={disabled}
+        onChange={(event) => setCustom(event.target.value.replace(/[^0-9]/g, ''))}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && custom) void apply(Number(custom))
+        }}
+      />
+      <button
+        className="btn"
+        disabled={disabled || custom === ''}
+        onClick={() => void apply(Number(custom))}
+      >
+        Set
+      </button>
+
+      <span
+        style={{
+          fontSize: 11, color: 'var(--text-dimmer)', flex: 1, minWidth: 0,
+          whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+        }}
+        title="Applies the first time a mailbox is read. After that only unread mail is fetched, so the span costs nothing on later syncs."
+      >
+        {note ?? 'first read only'}
+      </span>
+    </div>
   )
 }

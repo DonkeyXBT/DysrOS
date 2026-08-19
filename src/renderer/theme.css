@@ -686,7 +686,7 @@ a:hover { color: var(--accent-bright); }
   grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
   align-items: start;
   align-content: start;
-  gap: 13px;
+  gap: 11px;
   overflow-y: auto;
 }
 .settings-grid > section { margin: 0; }

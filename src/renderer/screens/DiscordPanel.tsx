@@ -127,9 +127,8 @@ export function DiscordPanel() {
         ))}
       </div>
 
-      <div style={{ fontSize: 11, color: 'var(--text-ghost)', lineHeight: 1.5 }}>
-        Each notification is an embed showing the item, amount, carrier and tracking. The webhook
-        URL is stored encrypted and never shown again in full.
+      <div style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
+        The webhook URL is stored encrypted and never shown again in full.
       </div>
     </section>
   )
