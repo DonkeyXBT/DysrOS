@@ -127,7 +127,7 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
             <div style={{ textAlign: 'right' }}>Shipping</div>
             <div style={{ textAlign: 'right' }}>Total</div>
             <div>Status</div>
-            <div>Parcel</div>
+            <div>Email</div>
           </div>
 
           <div className="table-scroll-y">
@@ -199,7 +199,21 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
                     {STATUS_LABEL[row.status] ?? row.status}
                   </span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+                  {/* The mailbox this order came in on: the mail is where the
+                      row came from, and with more than one account connected it
+                      is the difference between two of them buying the same
+                      thing. */}
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}
+                    title={row.mailSubject ?? undefined}
+                  >
+                    {row.mailbox ?? '—'}
+                  </span>
                   {/* Only worth saying when something is wrong. That an order's
                       parts add up is the ordinary case, and saying so on every
                       row is noise. */}
