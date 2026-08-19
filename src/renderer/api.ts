@@ -53,7 +53,44 @@ export interface RedirectReportView {
   reason: string | null
   message: string
 }
+export interface BestSellerView {
+  title: string
+  units: number
+  revenue: string
+  revenueMinor: number
+  profit: string | null
+  profitMinor: number | null
+  lastSoldAt: string
+  imageUrl: string | null
+}
+
+export interface SeriesPointView {
+  period: string
+  revenueMinor: number
+  profitMinor: number
+}
+
+export interface ActivityRowView {
+  kind: 'order' | 'sale' | 'parcel'
+  id: string
+  title: string
+  meta: string
+  amount: string | null
+  at: string
+  status: string
+  imageUrl: string | null
+}
+
 export interface DashboardView {
+  bestSellers: BestSellerView[]
+  allTimeBest: BestSellerView | null
+  salesSeries: SeriesPointView[]
+  activity: ActivityRowView[]
+  pending: { units: number; value: string; oldestDays: number | null }
+  vat: {
+    rateBasisPoints: number; paidOnPurchases: string; collectedOnSales: string
+    balance: string; balanceMinor: number
+  }
   topProducts: {
     title: string; units: number; spend: string; spendMinor: number
     lastBoughtAt: string | null; imageUrl: string | null
@@ -65,6 +102,8 @@ export interface DashboardView {
   profit: {
     net: string; netMinor: number; revenue: string; fees: string
     marginPercent: number; salesRecorded: number
+    /** Sales whose goods were bought outside this application. */
+    uncosted: number
     channels: { name: string; value: string; minor: number }[]
   }
   money: { out: string; in: string; salesRecorded: number }
@@ -253,6 +292,7 @@ interface Api {
   }): Promise<{ sold: number; grossMinor: number; profitMinor: number; vatMinor: number }>
   unsellItems(ids: string[]): Promise<number>
   sales(): Promise<SaleView[]>
+  salesSeries(days: number | null): Promise<SeriesPointView[]>
   saveLabel(shipmentId: string): Promise<{ saved: boolean; path?: string; reason?: string }>
   openLabel(shipmentId: string): Promise<{ opened: boolean; path?: string }>
   updateSale(id: string, input: {

@@ -300,6 +300,7 @@ export function App() {
               onGo={(target) => setScreen(target)}
               dataVersion={dataVersion}
               hasMail={(summary?.messageCount ?? 0) > 0}
+              mailbox={account.primary}
             />
           )}
           {screen === 'Inventory' && <Inventory query={query} dataVersion={dataVersion} onSearch={setQuery} />}

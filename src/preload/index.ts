@@ -102,6 +102,7 @@ const api = {
   unsellItems: (ids: string[]) => ipcRenderer.invoke('unsell-items', ids),
   vatPosition: () => ipcRenderer.invoke('vat-position'),
   sales: () => ipcRenderer.invoke('sales'),
+  salesSeries: (days: number | null) => ipcRenderer.invoke('sales-series', days),
   saveLabel: (shipmentId: string) => ipcRenderer.invoke('save-label', shipmentId),
   openLabel: (shipmentId: string) => ipcRenderer.invoke('open-label', shipmentId),
   updateSale: (id: string, input: unknown) => ipcRenderer.invoke('update-sale', id, input),

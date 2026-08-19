@@ -696,6 +696,7 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('vat-position', () => service.vatPosition())
   ipcMain.handle('sales', () => service.listSales())
+  ipcMain.handle('sales-series', (_event, days: number | null) => service.salesSeries(days))
   handle('save-label', async (shipmentId: string) => {
     const label = await service.labelFor(shipmentId)
     if (!label) {
