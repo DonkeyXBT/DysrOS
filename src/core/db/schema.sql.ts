@@ -418,3 +418,15 @@ export const SCHEMA_V12 = `
 ALTER TABLE sales ADD COLUMN title TEXT;
 ALTER TABLE shipments ADD COLUMN label_message_id TEXT;
 `
+
+/**
+ * Who a mail was addressed to, as opposed to which mailbox collected it.
+ *
+ * One mailbox gathers mail sent to many addresses — aliases, forwards, a
+ * catch-all — and which address was used is the useful fact: it is how one
+ * account's orders are told from another's. The mailbox was standing in for it
+ * and answering the wrong question.
+ */
+export const SCHEMA_V13 = `
+ALTER TABLE messages ADD COLUMN to_address TEXT;
+`

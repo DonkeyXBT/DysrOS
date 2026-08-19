@@ -8,7 +8,9 @@ import { Confirm } from '../Confirm.js'
 // Sized to fit the page rather than to be scrolled sideways: the last column
 // is the one that gets cut, and "no matching order" is the one you most need
 // to read.
-const COLUMNS = '58px 70px 108px 78px minmax(150px,1fr) 36px 76px 78px 84px 104px 112px'
+// The address an order was sent to is the point of the last column — an alias
+// per account is common — so it gets the width to be read.
+const COLUMNS = '54px 62px 104px 74px minmax(130px,1fr) 34px 72px 74px 80px 96px 168px'
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'oklch(0.68 0.02 265)',
@@ -206,13 +208,32 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
                       thing. */}
                   <span
                     className="mono"
-                    style={{
-                      fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap',
-                      overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}
-                    title={row.mailSubject ?? undefined}
+                    style={{ fontSize: 11, display: 'flex', minWidth: 0, whiteSpace: 'nowrap' }}
+                    title={[row.mailbox, row.mailSubject].filter(Boolean).join(' — ')}
                   >
-                    {row.mailbox ?? '—'}
+                    {/* The part before the @ identifies which alias ordered,
+                        so it is the part that must survive a narrow column. */}
+                    {/* Both halves may shrink — a grid track will otherwise be
+                        pushed wider by a long address and take the table with
+                        it — but the domain gives way first. */}
+                    <span
+                      style={{
+                        color: 'var(--text-muted)', minWidth: 0, flexShrink: 1,
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {(row.mailbox ?? '—').split('@')[0]}
+                    </span>
+                    {row.mailbox?.includes('@') && (
+                      <span
+                        style={{
+                          color: 'var(--text-ghost)', minWidth: 0, flexShrink: 3,
+                          overflow: 'hidden', textOverflow: 'ellipsis',
+                        }}
+                      >
+                        @{row.mailbox.split('@')[1]}
+                      </span>
+                    )}
                   </span>
                   {/* Only worth saying when something is wrong. That an order's
                       parts add up is the ordinary case, and saying so on every

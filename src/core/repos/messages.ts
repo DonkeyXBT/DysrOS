@@ -13,6 +13,8 @@ export interface StoredMessage {
   contentHash: string
   fromAddress: string
   fromName: string | null
+  /** The address the mail was sent to, which may be an alias of the mailbox. */
+  toAddress: string | null
   subject: string
   receivedAt: string
   rawPath: string
@@ -36,6 +38,7 @@ interface MessageRow {
   content_hash: string
   from_address: string
   from_name: string | null
+  to_address: string | null
   subject: string
   received_at: string
   raw_path: string
@@ -55,6 +58,7 @@ function toMessage(row: MessageRow): StoredMessage {
     contentHash: row.content_hash,
     fromAddress: row.from_address,
     fromName: row.from_name,
+    toAddress: row.to_address,
     subject: row.subject,
     receivedAt: row.received_at,
     rawPath: row.raw_path,
@@ -88,8 +92,8 @@ export class MessageRepo {
       .prepare(
         `INSERT INTO messages
           (id, account_id, uid, folder, message_id, content_hash, from_address,
-           from_name, subject, received_at, raw_path, body_preview, parse_status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
+           from_name, to_address, subject, received_at, raw_path, body_preview, parse_status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`,
       )
       .run(
         id,
@@ -100,6 +104,7 @@ export class MessageRepo {
         message.contentHash,
         message.fromAddress,
         message.fromName,
+        message.toAddress,
         message.subject,
         message.receivedAt,
         message.rawPath,

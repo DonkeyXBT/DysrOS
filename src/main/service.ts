@@ -279,6 +279,11 @@ export class AppService {
       }
       try {
         const parsed = await loadEml(readFileSync(row.raw_path))
+        // Facts about the envelope are re-read too: the address a mail was
+        // sent to was not recorded until recently, and the stored copy still
+        // has it.
+        this.db.prepare('UPDATE messages SET to_address = COALESCE(?, to_address) WHERE id = ?')
+          .run(parsed.toAddress, row.id)
         const result = this.registry.parse(parsed)
         if (!result) {
           this.messages.markUnrecognized(row.id)
@@ -467,6 +472,7 @@ export class AppService {
       contentHash: hashContent(raw.toString('utf8')),
       fromAddress: parsed.fromAddress,
       fromName: parsed.fromName,
+      toAddress: parsed.toAddress,
       subject: parsed.subject || basename(path),
       receivedAt: parsed.receivedAt,
       rawPath: path,
@@ -583,7 +589,10 @@ export class AppService {
               -- The mailbox the order arrived in. With more than one connected
               -- it is the difference between two accounts buying the same
               -- thing, and it is the mail this row was built from.
-              (SELECT a.email FROM events e
+              -- The address the mail was sent to, which is not always the
+              -- mailbox that collected it: an alias or a forward means one
+              -- mailbox gathers mail for many addresses.
+              (SELECT COALESCE(m.to_address, a.email) FROM events e
                  JOIN messages m ON m.id = e.message_id
                  JOIN accounts a ON a.id = m.account_id
                 WHERE e.retailer = p.retailer AND e.external_order_id = p.external_order_id
@@ -656,7 +665,7 @@ export class AppService {
   listCancellations(): CancellationView[] {
     const mailboxes = new Map(
       (this.db.prepare(
-        `SELECT e.id, a.email, m.subject FROM events e
+        `SELECT e.id, COALESCE(m.to_address, a.email) AS email, m.subject FROM events e
            JOIN messages m ON m.id = e.message_id
            JOIN accounts a ON a.id = m.account_id`,
       ).all() as { id: string; email: string; subject: string }[])
@@ -935,6 +944,7 @@ export class AppService {
       contentHash,
       fromAddress: parsed.fromAddress,
       fromName: parsed.fromName,
+      toAddress: parsed.toAddress,
       subject: parsed.subject || '(no subject)',
       receivedAt: parsed.receivedAt,
       rawPath,
@@ -1573,6 +1583,9 @@ export class AppService {
       contentHash: hashContent(`aycd:${captured.taskId}`),
       fromAddress: `${event.retailer}@aycd-inbox`,
       fromName: 'AYCD Inbox',
+      // A capture has no envelope of its own: Inbox reports the event, not the
+      // mail it came from.
+      toAddress: null,
       subject: `${event.retailer} ${event.type} ${event.externalOrderId ?? '(no reference)'}`,
       receivedAt: event.occurredAt,
       rawPath: '',

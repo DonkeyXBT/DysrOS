@@ -36,6 +36,7 @@ function record(event: ParsedEvent, parserId = 'test-parser'): void {
     contentHash: hashContent(`message-${messageSeq}`),
     fromAddress: 'automail@bol.com',
     fromName: 'bol',
+    toAddress: 'shop@example.com',
     subject: `message ${messageSeq}`,
     receivedAt: event.occurredAt,
     rawPath: `mail/${messageSeq}.eml`,

@@ -11,6 +11,17 @@ import { buildCrashReport, issueUrl } from '../core/crash-report.js'
 
 const REPO = 'DonkeyXBT/DysrOS'
 
+/**
+ * This build's version, baked in at build time.
+ *
+ * `app.getVersion()` answers with Electron's own version when running from
+ * source, so using it to decide whether stored mail has been read by this
+ * build meant the decision was wrong in development — the one place mail is
+ * re-read most often.
+ */
+declare const __APP_VERSION__: string
+const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0-dev'
+
 let service: AppService
 let images: ImageCache
 /** Everything running in the background, for the activity list in the sidebar. */
@@ -369,10 +380,10 @@ app.whenReady().then(() => {
 
   // Mail read by an older set of parsers is read again, from the raw copy kept
   // for exactly this, so what the parsers learned since applies to it too.
-  if (service.needsReparse(app.getVersion())) {
+  if (service.needsReparse(APP_VERSION)) {
     activity.start('reparse', 'Re-reading stored mail', 'applying what the parsers learned')
     void service.reparseAll().then(async (result) => {
-      service.markReparsed(app.getVersion())
+      service.markReparsed(APP_VERSION)
       activity.finish('reparse', `${result.reparsed} of ${result.examined} re-read`)
       if (result.reparsed > 0) mainWindow?.webContents.send('mail-updated', result)
       // Re-reading rebuilds parcels from their mail, so mail about a parcel

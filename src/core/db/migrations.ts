@@ -1,5 +1,5 @@
 import type { Db } from './connection.js'
-import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12 } from './schema.sql.js'
+import { SCHEMA_V1, SCHEMA_V2, SCHEMA_V3, SCHEMA_V4, SCHEMA_V5, SCHEMA_V6, SCHEMA_V7, SCHEMA_V8, SCHEMA_V9, SCHEMA_V10, SCHEMA_V11, SCHEMA_V12, SCHEMA_V13 } from './schema.sql.js'
 
 export const MIGRATIONS: readonly { version: number; sql: string }[] = [
   { version: 1, sql: SCHEMA_V1 },
@@ -14,6 +14,7 @@ export const MIGRATIONS: readonly { version: number; sql: string }[] = [
   { version: 10, sql: SCHEMA_V10 },
   { version: 11, sql: SCHEMA_V11 },
   { version: 12, sql: SCHEMA_V12 },
+  { version: 13, sql: SCHEMA_V13 },
 ]
 
 function ensureVersionTable(db: Db): void {
