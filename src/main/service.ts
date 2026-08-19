@@ -1797,6 +1797,23 @@ export class AppService {
       months,
       aging,
       series,
+      bestSellers: this.bestSellers(3, 30),
+      allTimeBest: this.bestSellers(1)[0] ?? null,
+      salesSeries: this.salesSeries(30),
+      activity: this.recentActivity(8),
+      // What is still coming, priced, and how long the oldest has been waiting.
+      pending: (() => {
+        const incoming = this.listInventory().filter((item) => item.status === 'incoming')
+        const oldest = incoming
+          .map((item) => item.daysHeld ?? 0)
+          .reduce((worst, days) => Math.max(worst, days), 0)
+        return {
+          units: incoming.length,
+          value: formatMoney(money(incoming.reduce((total, item) => total + item.costMinor, 0), 'EUR')),
+          oldestDays: incoming.length === 0 ? null : oldest,
+        }
+      })(),
+      vat: this.vatPosition(),
       reviewCount: count("SELECT COUNT(*) AS n FROM messages WHERE parse_status = 'unrecognized'"),
     }
   }
@@ -2298,6 +2315,125 @@ export class AppService {
     }
   }
 
+  /**
+   * What has sold best, by units.
+   *
+   * Only sales say this: what you buy most and what you sell most are
+   * different questions, and the second is the one that decides what to buy
+   * next. Revenue is what came in; profit is stated only where the goods have
+   * a known cost, because a marketplace sale of something bought elsewhere has
+   * none.
+   */
+  bestSellers(limit = 3, sinceDays: number | null = null): BestSellerView[] {
+    const since = sinceDays === null
+      ? null
+      : new Date(Date.now() - sinceDays * 86_400_000).toISOString()
+
+    const rows = this.db.prepare(
+      `SELECT COALESCE(sa.title, i.title) AS title,
+              COUNT(*) AS units,
+              SUM(sa.payout_minor) AS revenue,
+              SUM(CASE WHEN i.id IS NULL THEN 0 ELSE sa.payout_minor - i.cost_minor END) AS profit,
+              SUM(CASE WHEN i.id IS NULL THEN 0 ELSE 1 END) AS costed,
+              MAX(sa.sold_at) AS last_sold,
+              MAX(i.image_url) AS image_url
+       FROM sales sa
+       LEFT JOIN items i ON i.id = sa.item_id
+       WHERE (? IS NULL OR sa.sold_at >= ?)
+       GROUP BY lower(trim(COALESCE(sa.title, i.title)))
+       ORDER BY units DESC, revenue DESC
+       LIMIT ?`,
+    ).all(since, since, limit) as {
+      title: string | null; units: number; revenue: number; profit: number
+      costed: number; last_sold: string; image_url: string | null
+    }[]
+
+    return rows.map((row) => ({
+      title: row.title ?? 'Unknown item',
+      units: row.units,
+      revenue: formatMoney(money(row.revenue, 'EUR')),
+      revenueMinor: row.revenue,
+      // Null rather than zero where nothing sold has a cost behind it: zero
+      // would read as breaking even.
+      profit: row.costed === 0 ? null : formatMoney(money(row.profit, 'EUR')),
+      profitMinor: row.costed === 0 ? null : row.profit,
+      lastSoldAt: row.last_sold,
+      imageUrl: row.image_url,
+    }))
+  }
+
+  /**
+   * Revenue and profit over time, at the resolution the span deserves.
+   *
+   * A week reads by day; a year by month. The buckets are filled from what is
+   * recorded rather than interpolated, so a flat stretch means nothing
+   * happened rather than nothing being known.
+   */
+  salesSeries(days: number | null = 30): SeriesPointView[] {
+    const span = days ?? 3650
+    const bucket = span <= 31 ? 'day' : span <= 120 ? 'week' : 'month'
+    const format = bucket === 'day' ? '%Y-%m-%d' : bucket === 'week' ? '%Y-W%W' : '%Y-%m'
+    const since = new Date(Date.now() - span * 86_400_000).toISOString()
+
+    const rows = this.db.prepare(
+      `SELECT strftime('${format}', sa.sold_at) AS period,
+              SUM(sa.payout_minor) AS revenue,
+              SUM(CASE WHEN i.id IS NULL THEN 0 ELSE sa.payout_minor - i.cost_minor END) AS profit
+       FROM sales sa
+       LEFT JOIN items i ON i.id = sa.item_id
+       WHERE sa.sold_at >= ?
+       GROUP BY period
+       ORDER BY period`,
+    ).all(since) as { period: string; revenue: number; profit: number }[]
+
+    return rows.map((row) => ({
+      period: row.period,
+      revenueMinor: row.revenue,
+      profitMinor: row.profit,
+    }))
+  }
+
+  /** The latest thing that happened, whatever kind of thing it was. */
+  recentActivity(limit = 8): ActivityRowView[] {
+    const orders = this.listPurchases().slice(0, limit).map((purchase) => ({
+      kind: 'order' as const,
+      id: purchase.id,
+      title: purchase.title ?? purchase.reference ?? 'Order',
+      meta: [purchase.retailer, purchase.reference].filter(Boolean).join(' · '),
+      amount: purchase.total,
+      at: purchase.orderedAt,
+      status: purchase.status,
+      imageUrl: null as string | null,
+    }))
+
+    const sales = this.listSales().slice(0, limit).map((sale) => ({
+      kind: 'sale' as const,
+      id: sale.id,
+      title: sale.title,
+      meta: [sale.channel === 'offline' ? 'sold privately' : sale.channel, sale.buyer]
+        .filter(Boolean).join(' · '),
+      amount: sale.gross,
+      at: sale.soldAt,
+      status: 'sold',
+      imageUrl: sale.imageUrl,
+    }))
+
+    const parcels = this.listShipments().slice(0, limit).map((parcel) => ({
+      kind: 'parcel' as const,
+      id: parcel.id,
+      title: parcel.title ?? parcel.trackingNumber ?? 'Parcel',
+      meta: [parcel.carrier.toUpperCase(), parcel.trackingNumber].filter(Boolean).join(' · '),
+      amount: null as string | null,
+      at: parcel.lastMovementAt ?? parcel.expectedDeliveryAt ?? parcel.id,
+      status: parcel.status,
+      imageUrl: parcel.imageUrl,
+    }))
+
+    return [...orders, ...sales, ...parcels]
+      .sort((a, b) => (b.at ?? '').localeCompare(a.at ?? ''))
+      .slice(0, limit)
+  }
+
   /** Rows for the DHL ServicePoint redirect tool's `trackings.csv`. */
   redirectCsv(): string {
     const rows = this.listShipments().filter(
@@ -2460,6 +2596,35 @@ export interface ItemView {
   orderRef: string | null
 }
 
+export interface BestSellerView {
+  title: string
+  units: number
+  revenue: string
+  revenueMinor: number
+  /** Null when none of these sales has a cost behind it. */
+  profit: string | null
+  profitMinor: number | null
+  lastSoldAt: string
+  imageUrl: string | null
+}
+
+export interface SeriesPointView {
+  period: string
+  revenueMinor: number
+  profitMinor: number
+}
+
+export interface ActivityRowView {
+  kind: 'order' | 'sale' | 'parcel'
+  id: string
+  title: string
+  meta: string
+  amount: string | null
+  at: string
+  status: string
+  imageUrl: string | null
+}
+
 export interface SaleView {
   id: string
   itemId: string | null
@@ -2502,6 +2667,20 @@ export interface AycdStatusView {
 
 export interface DashboardView {
   bought: { orders: number; units: number; spend: string; shipped: number; delivered: number }
+  bestSellers: BestSellerView[]
+  allTimeBest: BestSellerView | null
+  salesSeries: SeriesPointView[]
+  activity: ActivityRowView[]
+  /** Units bought and not yet arrived, what they cost, and how long the
+   *  oldest has been outstanding. */
+  pending: { units: number; value: string; oldestDays: number | null }
+  vat: {
+    rateBasisPoints: number
+    paidOnPurchases: string
+    collectedOnSales: string
+    balance: string
+    balanceMinor: number
+  }
   inFlight: { units: number; parcels: number; awaitingCode: number }
   stock: { units: number; capital: string; capitalMinor: number }
   cancelled: { units: number; owed: string; owedMinor: number }
