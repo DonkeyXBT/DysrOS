@@ -36,7 +36,9 @@ function isPostnlMail(message: ParsedMessage): boolean {
 
 /** Who sent the parcel — "je pakket van bol" — as PostNL words it. */
 function findSender(body: string): string | null {
-  const match = /pakket van\s+([a-z0-9][a-z0-9 .&'-]{1,30}?)\s*(?:afgeleverd|bezorgd|is|\.|,)/i
+  // The name ends at whichever continuation comes first, or at the end of the
+  // line: "je pakket van Aecomm" is the whole sentence in one template.
+  const match = /pakket van\s+([a-z0-9][a-z0-9 .&'-]{1,30}?)\s*(?:afgeleverd|bezorgd|is|[.,\n]|$)/i
     .exec(body)
   const name = match?.[1]?.trim().toLowerCase()
   return name && name.length > 1 ? name : null
@@ -91,7 +93,8 @@ export const postnlInTransit: Parser = {
   matches(message) {
     if (!isPostnlMail(message)) return false
     if (postnlDelivered.matches(message)) return false
-    return /onderweg|bezorgen we|verwacht/i.test(`${message.subject} ${bodyOf(message)}`)
+    return /onderweg|bezorgen|verwacht|nieuw pakket|check je bezorgmoment/i
+      .test(`${message.subject} ${bodyOf(message)}`)
   },
 
   parse(message): ParsedEvent[] {

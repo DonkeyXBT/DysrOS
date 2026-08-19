@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import Database from 'better-sqlite3'
-import { existsSync, mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppService } from './service.js'
 import type { CompletedTask, MailTask } from '../core/aycd/client.js'
@@ -1927,5 +1927,91 @@ describe('how far back mail is collected', () => {
     // Nothing already collected is thrown away for being old.
     expect(cursor()).toBe(1)
     raw.close()
+  })
+})
+
+describe('a webshop order, its parcel and its refund', () => {
+  const HTML = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'fixtures', 'html')
+
+  /** A saved page is a mail's body; this gives it the envelope it arrived in. */
+  async function importHtml(file: string, subject: string, from = 'sales@catchyourcards.nl') {
+    const path = join(mkdtempSync(join(tmpdir(), 'resell-ops-eml-')), 'message.eml')
+    writeFileSync(path, [
+      `From: CatchYourCards <${from}>`,
+      'To: shop@example.com',
+      `Subject: ${subject}`,
+      'Date: Mon, 2 Mar 2026 09:00:00 +0100',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      readFileSync(join(HTML, file), 'utf8'),
+    ].join('\r\n'))
+    return service.importEml(path)
+  }
+
+  const present = existsSync(join(HTML, '2026-02-27-Je-bestelling-bij-CatchYourCards-is-ontvangen!.html'))
+
+  it.skipIf(!present)('records the order, the parcel and the money coming back', async () => {
+    const order = await importHtml(
+      '2026-02-27-Je-bestelling-bij-CatchYourCards-is-ontvangen!.html',
+      'Je bestelling bij CatchYourCards is ontvangen!',
+    )
+    expect(order.parserId).toBe('catchyourcards-order')
+
+    const purchase = service.listPurchases().find((row) => row.reference === '60619')!
+    expect(purchase.total).toBe('€76.90')
+    expect(service.listInventory()).toHaveLength(1)
+
+    // The fulfilment notice carries the barcode the shop's own mail never had.
+    const parcel = await importHtml(
+      '2026-03-03-Jouw-order-60619-ligt-voor-je-klaar.html',
+      'Jouw order 60619 ligt voor je klaar',
+      'no-reply@example-fulfilment.test',
+    )
+    expect(parcel.parserId).toBe('catchyourcards-ready-for-pickup')
+
+    const shipment = service.listShipments()[0]!
+    expect(shipment).toMatchObject({
+      carrier: 'postnl',
+      trackingNumber: '3SYZXG3680311',
+      status: 'ready_for_pickup',
+    })
+    expect(shipment.linkedToPurchase).toBe(true)
+  })
+
+  it.skipIf(!present)('holds a refund whose order was never collected, then applies it', async () => {
+    const refund = await importHtml(
+      '2026-02-24-Je-bestelling-#59277-bij-CatchYourCards-is-terugbetaald.html',
+      'Je bestelling #59277 bij CatchYourCards is terugbetaald',
+    )
+    expect(refund.parserId).toBe('catchyourcards-refund')
+
+    // Nothing to attach it to yet, so it waits rather than being guessed at.
+    expect(service.summary().heldEvents).toBeGreaterThan(0)
+    expect(service.listPurchases().find((row) => row.reference === '59277')).toBeUndefined()
+  })
+
+  it.skipIf(!present)('marks the order refunded and its units returned', async () => {
+    await importHtml(
+      '2026-02-27-Je-bestelling-bij-CatchYourCards-is-ontvangen!.html',
+      'Je bestelling bij CatchYourCards is ontvangen!',
+    )
+
+    // The same order, refunded. The subject carries the reference.
+    const path = join(mkdtempSync(join(tmpdir(), 'resell-ops-eml-')), 'refund.eml')
+    writeFileSync(path, [
+      'From: CatchYourCards <sales@catchyourcards.nl>',
+      'Subject: Je bestelling #60619 bij CatchYourCards is terugbetaald',
+      'Date: Wed, 4 Mar 2026 09:00:00 +0100',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      readFileSync(join(HTML, '2026-02-24-Je-bestelling-#59277-bij-CatchYourCards-is-terugbetaald.html'), 'utf8')
+        .replace(/59277/g, '60619'),
+    ].join('\r\n'))
+    await service.importEml(path)
+
+    const purchase = service.listPurchases().find((row) => row.reference === '60619')!
+    expect(purchase.status).toBe('refunded')
+    expect(purchase.refundOutstanding).toBe('€76.90')
+    expect(service.listInventory().every((item) => item.status === 'returned')).toBe(true)
   })
 })
