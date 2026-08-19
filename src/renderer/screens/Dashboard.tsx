@@ -2,12 +2,23 @@ import { useEffect, useState } from 'react'
 import { api, type DashboardView } from '../api.js'
 import { SkeletonDashboard } from '../Skeleton.js'
 
+/**
+ * The dashboard from the design: pipeline, profit, capital, KPIs, and what
+ * needs attention.
+ *
+ * Every figure is computed from what the mail actually said. Where a figure
+ * cannot be known yet — profit without a sales channel — the tile says so
+ * rather than showing a confident zero, which would read as "you made nothing"
+ * instead of "this is not connected".
+ */
 export function Dashboard({
   onSync,
+  onGo,
   dataVersion,
   hasMail,
 }: {
   onSync: () => void
+  onGo: (screen: 'Inventory' | 'Shipments' | 'Purchases' | 'Settings') => void
   dataVersion: number
   hasMail: boolean
 }) {
@@ -37,49 +48,131 @@ export function Dashboard({
     )
   }
 
+  const attention = buildAttention(data, onGo)
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-      <section style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 13 }}>
-        <Stat
-          label="BOUGHT"
-          value={String(data.bought.orders)}
-          unit={`order${data.bought.orders === 1 ? '' : 's'}`}
-          note={`${data.bought.units} unit${data.bought.units === 1 ? '' : 's'} · ${data.bought.spend}`}
-          hue={225}
-        />
-        <Stat
-          label="ON THE WAY"
-          value={String(data.inFlight.units)}
-          unit="units"
-          note={
-            data.inFlight.awaitingCode > 0
-              ? `${data.inFlight.parcels} parcels · ${data.inFlight.awaitingCode} awaiting a code`
-              : `${data.inFlight.parcels} parcel${data.inFlight.parcels === 1 ? '' : 's'} in transit`
-          }
-          hue={40}
-        />
-        <Stat
-          label="IN STOCK"
-          value={String(data.stock.units)}
-          unit="units"
-          note={`${data.stock.capital} tied up`}
-          hue={148}
-        />
-        <Stat
-          label="CANCELLED"
-          value={String(data.cancelled.units)}
-          unit="units"
-          note={
-            data.cancelled.owedMinor > 0
-              ? `${data.cancelled.owed} owed back to you`
-              : 'nothing outstanding'
-          }
-          hue={350}
-          alert={data.cancelled.owedMinor > 0}
-        />
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <section style={{ display: 'grid', gridTemplateColumns: '1.8fr 1fr', gap: 10, alignItems: 'stretch' }}>
+        <Card title="Pipeline" note="units through each stage">
+          <Pipeline funnel={data.funnel} />
+        </Card>
+
+        <Card title="Net profit">
+          <NetProfit profit={data.profit} spend={data.money.out} />
+        </Card>
       </section>
 
-      <section className="section" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <section
+        style={{
+          display: 'grid', gridTemplateColumns: '1fr 1.25fr 1fr', gap: 10, alignItems: 'stretch',
+        }}
+      >
+        <Card title="Capital tied up">
+          <Capital data={data} onGo={onGo} />
+        </Card>
+
+        <div
+          style={{
+            display: 'grid', gridTemplateColumns: '1fr 1fr', gridTemplateRows: '1fr 1fr', gap: 10,
+          }}
+        >
+          <Kpi
+            label="On the way"
+            value={String(data.inFlight.units)}
+            meta={`${data.inFlight.parcels} parcel${data.inFlight.parcels === 1 ? '' : 's'} moving`}
+            hue={40}
+            fill={data.bought.units === 0 ? 0 : data.inFlight.units / data.bought.units}
+            onClick={() => onGo('Shipments')}
+          />
+          <Kpi
+            label="Awaiting code"
+            value={String(data.inFlight.awaitingCode)}
+            meta={data.inFlight.awaitingCode > 0 ? 'looked up automatically' : 'all parcels tracked'}
+            hue={200}
+            fill={data.inFlight.parcels === 0 ? 0 : data.inFlight.awaitingCode / data.inFlight.parcels}
+            onClick={() => onGo('Shipments')}
+          />
+          <Kpi
+            label="Owed back"
+            value={data.cancelled.owed}
+            meta={`${data.cancelled.units} cancelled unit${data.cancelled.units === 1 ? '' : 's'}`}
+            hue={350}
+            fill={data.cancelled.owedMinor > 0 ? 1 : 0}
+            alert={data.cancelled.owedMinor > 0}
+            onClick={() => onGo('Purchases')}
+          />
+          <Kpi
+            label="Unrecognised"
+            value={String(data.reviewCount)}
+            meta={data.reviewCount > 0 ? 'waiting in review' : 'everything understood'}
+            hue={285}
+            fill={data.reviewCount > 0 ? 1 : 0}
+            onClick={() => onGo('Settings')}
+          />
+        </div>
+
+        <div
+          style={{
+            borderRadius: 20,
+            background: 'linear-gradient(155deg,#1b2a4a 0%,#3a3a6e 45%,#e8907e 100%)',
+            padding: '14px 16px', display: 'flex', flexDirection: 'column', gap: 8,
+            minWidth: 0, overflow: 'hidden',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <span
+              style={{
+                background: 'rgba(255,255,255,.22)', border: '1px solid rgba(255,255,255,.3)',
+                borderRadius: 999, padding: '3px 10px', fontSize: 10.5, fontWeight: 700, color: '#fff',
+              }}
+            >
+              Needs you
+            </span>
+            <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,.72)' }}>
+              {attention.length === 0 ? 'nothing right now' : 'most pressing first'}
+            </span>
+          </div>
+
+          <div
+            style={{
+              display: 'flex', flexDirection: 'column', gap: 6, flex: 1,
+              minHeight: 0, overflow: 'auto',
+            }}
+          >
+            {attention.length === 0 ? (
+              <div style={{ fontSize: 11.5, color: 'rgba(255,255,255,.8)', lineHeight: 1.5 }}>
+                Nothing is stalled, unmatched or owed. Everything the mail said has been applied.
+              </div>
+            ) : (
+              attention.map((item) => (
+                <button
+                  key={item.title}
+                  onClick={item.go}
+                  style={{
+                    textAlign: 'left', cursor: 'pointer', fontFamily: 'inherit', color: '#fff',
+                    border: '1px solid rgba(255,255,255,.22)', background: 'rgba(255,255,255,.13)',
+                    borderRadius: 12, padding: '8px 10px',
+                    display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0,
+                  }}
+                >
+                  <span
+                    style={{
+                      fontSize: 9.5, fontWeight: 700, letterSpacing: '.06em',
+                      textTransform: 'uppercase', color: 'rgba(255,255,255,.72)',
+                    }}
+                  >
+                    {item.kind}
+                  </span>
+                  <span style={{ fontSize: 11.5, fontWeight: 700, lineHeight: 1.3 }}>{item.title}</span>
+                  <span style={{ fontSize: 10.5, color: 'rgba(255,255,255,.72)' }}>{item.meta}</span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="section" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
           <h2>Money out and in</h2>
           <span className="section-note">last 12 weeks</span>
@@ -88,14 +181,12 @@ export function Dashboard({
             <Legend colour="var(--teal)" label="Received" value={data.money.in} />
           </div>
         </div>
-
         <MoneyChart series={data.series} />
-
         {data.money.salesRecorded === 0 && (
           <div style={{ fontSize: 11.5, color: 'var(--text-ghost)', lineHeight: 1.5 }}>
             Received counts refunds that have actually arrived, and marketplace payouts. No sales
-            channel is connected yet, so it reflects refunds only — money owed back to you from
-            cancellations is shown above rather than counted as received.
+            channel is connected yet, so it reflects refunds only — money owed back from
+            cancellations is shown as owed rather than counted as received.
           </div>
         )}
       </section>
@@ -103,46 +194,295 @@ export function Dashboard({
   )
 }
 
-function Stat({
-  label, value, unit, note, hue, alert,
-}: {
-  label: string
-  value: string
-  unit: string
-  note: string
-  hue: number
-  alert?: boolean
-}) {
+function Card({
+  title, note, children,
+}: { title: string; note?: string; children: React.ReactNode }) {
   return (
     <div
       className="section"
+      style={{ display: 'flex', flexDirection: 'column', gap: 10, minWidth: 0, padding: '14px 18px 12px' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <h2 style={{ fontSize: 14 }}>{title}</h2>
+        {note && <span style={{ fontSize: 11, color: 'var(--text-faint)' }}>{note}</span>}
+      </div>
+      {children}
+    </div>
+  )
+}
+
+/** Units at each stage, as columns whose height is their share of the largest. */
+function Pipeline({ funnel }: { funnel: DashboardView['funnel'] }) {
+  const peak = Math.max(1, ...funnel.map((stage) => stage.units))
+  const total = funnel.reduce((sum, stage) => sum + stage.units, 0)
+
+  if (total === 0) {
+    return (
+      <div style={{ fontSize: 12, color: 'var(--text-ghost)', padding: '30px 0' }}>
+        No units yet. An order becomes one row per unit, and each moves through these stages.
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ display: 'flex', alignItems: 'stretch', gap: 1, flex: 1, minHeight: 150 }}>
+      {funnel.map((stage) => {
+        const colour = `oklch(0.76 0.13 ${stage.hue})`
+        return (
+          <div
+            key={stage.label}
+            title={`${stage.units} units · ${stage.value}`}
+            style={{
+              flex: 1, display: 'flex', flexDirection: 'column', gap: 5,
+              padding: '0 4px', minWidth: 0,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 10, fontWeight: 700, letterSpacing: '.04em',
+                textTransform: 'uppercase', color: 'var(--text-dimmer)',
+                whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+              }}
+            >
+              {stage.label}
+            </div>
+            <div className="mono" style={{ fontSize: 19, fontWeight: 600, letterSpacing: '-.02em' }}>
+              {stage.units}
+            </div>
+            <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end' }}>
+              <div
+                style={{
+                  width: '100%',
+                  height: `${Math.max(2, (stage.units / peak) * 100)}%`,
+                  background: `color-mix(in oklab, ${colour} 55%, transparent)`,
+                  borderTop: `2px solid ${colour}`,
+                  borderRadius: '4px 4px 0 0',
+                }}
+              />
+            </div>
+            <div className="mono" style={{ fontSize: 10, color: 'var(--text-ghost)' }}>
+              {stage.value}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function NetProfit({
+  profit, spend,
+}: { profit: DashboardView['profit']; spend: string }) {
+  if (profit.salesRecorded === 0) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, flex: 1 }}>
+        <div className="mono" style={{ fontSize: 30, fontWeight: 600, letterSpacing: '-.03em', color: 'var(--text-dimmer)' }}>
+          —
+        </div>
+        <div style={{ fontSize: 11.5, color: 'var(--text-dimmer)', lineHeight: 1.5 }}>
+          Profit needs the sell side. No marketplace mail has been recognised yet, so there is no
+          revenue to set against cost — showing a number here would mean claiming you sold nothing.
+        </div>
+        <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10, marginTop: 'auto' }}>
+          <div className="stat-label">SPENT SO FAR</div>
+          <div className="mono" style={{ fontSize: 20, fontWeight: 600 }}>{spend}</div>
+        </div>
+      </div>
+    )
+  }
+
+  const positive = profit.netMinor >= 0
+  const peak = Math.max(1, ...profit.channels.map((channel) => channel.minor))
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 9, flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+        <div className="mono" style={{ fontSize: 34, fontWeight: 600, letterSpacing: '-.035em', lineHeight: 1 }}>
+          {profit.net}
+        </div>
+        <span
+          style={{
+            display: 'inline-flex', alignItems: 'center', gap: 5,
+            background: positive ? 'rgba(110,231,212,.13)' : 'rgba(232,106,160,.13)',
+            border: `1px solid ${positive ? 'rgba(110,231,212,.28)' : 'rgba(232,106,160,.28)'}`,
+            color: positive ? 'var(--teal)' : 'var(--pink)',
+            borderRadius: 999, padding: '4px 9px', fontSize: 11.5, fontWeight: 700,
+          }}
+        >
+          {positive ? '▲' : '▼'} {profit.marginPercent}%
+        </span>
+      </div>
+      <div style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>
+        {profit.revenue} in · {profit.fees} fees
+      </div>
+      <div
+        style={{
+          borderTop: '1px solid var(--border)', paddingTop: 10,
+          display: 'flex', flexDirection: 'column', gap: 9, flex: 1, minHeight: 0, overflow: 'auto',
+        }}
+      >
+        {profit.channels.map((channel) => (
+          <div key={channel.name} style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontSize: 12, color: 'var(--text-mid)' }}>{channel.name}</span>
+              <span className="mono" style={{ marginLeft: 'auto', fontSize: 12 }}>{channel.value}</span>
+            </div>
+            <div style={{ height: 8, borderRadius: 999, background: '#1d2331', overflow: 'hidden' }}>
+              <div
+                style={{
+                  width: `${(channel.minor / peak) * 100}%`, height: '100%',
+                  background: 'var(--grad-cool)',
+                }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Capital({
+  data, onGo,
+}: { data: DashboardView; onGo: (screen: 'Inventory') => void }) {
+  const peak = Math.max(1, ...data.months.map((month) => month.capital))
+  const stalled = data.aging.find((band) => band.stalled)
+
+  const points = data.months.map((month, index) => {
+    const x = data.months.length === 1 ? 0 : (index / (data.months.length - 1)) * 220
+    const y = 96 - (month.capital / peak) * 88
+    return `${index === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`
+  }).join(' ')
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+        <span className="mono" style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-.02em' }}>
+          {data.stock.capital}
+        </span>
+        <span style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>{data.stock.units} units</span>
+      </div>
+
+      <div style={{ position: 'relative', minHeight: 90 }}>
+        {stalled && stalled.units > 0 && (
+          <div
+            style={{
+              position: 'absolute', left: '50%', top: -2, transform: 'translateX(-50%)',
+              background: '#1f2635', border: '1px solid var(--border-pill)', borderRadius: 999,
+              padding: '3px 9px', fontSize: 10.5, fontWeight: 700, color: '#f0a8c0',
+              zIndex: 2, whiteSpace: 'nowrap',
+            }}
+          >
+            {stalled.value} sitting 90+ days
+          </div>
+        )}
+        <svg viewBox="0 0 220 100" preserveAspectRatio="none" style={{ width: '100%', height: 90, display: 'block' }}>
+          <path d={`${points} L220,100 L0,100 Z`} fill="rgba(232,106,160,.10)" />
+          <path d={points} fill="none" stroke="var(--pink)" strokeWidth="1.6" vectorEffect="non-scaling-stroke" />
+        </svg>
+      </div>
+
+      <div className="mono" style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: 'var(--text-ghost)' }}>
+        {data.months.map((month) => <span key={month.label}>{month.label}</span>)}
+      </div>
+
+      <div
+        style={{
+          borderTop: '1px solid var(--border)', paddingTop: 9,
+          display: 'flex', flexDirection: 'column', gap: 6,
+        }}
+      >
+        <div style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', color: 'var(--text-dimmer)' }}>
+          AGING · {data.stock.units} UNITS HELD
+        </div>
+        {data.aging.map((band) => (
+          <button
+            key={band.bucket}
+            onClick={() => onGo('Inventory')}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, width: '100%',
+              border: 0, background: 'transparent', padding: '2px 0',
+              cursor: 'pointer', fontFamily: 'inherit',
+            }}
+          >
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-mid)', width: 52, textAlign: 'left' }}>
+              {band.bucket}d
+            </span>
+            <span style={{ flex: 1, height: 5, borderRadius: 5, background: '#1d2331', overflow: 'hidden' }}>
+              <span
+                style={{
+                  display: 'block',
+                  width: `${data.stock.capitalMinor === 0 ? 0 : (band.minor / data.stock.capitalMinor) * 100}%`,
+                  height: '100%',
+                  background: band.stalled ? 'var(--pink)' : 'var(--accent)',
+                }}
+              />
+            </span>
+            <span className="mono" style={{ fontSize: 11, color: 'var(--text-muted)', width: 22, textAlign: 'right' }}>
+              {band.units}
+            </span>
+            <span
+              className="mono"
+              style={{
+                fontSize: 11, width: 66, textAlign: 'right',
+                color: band.stalled && band.units > 0 ? 'var(--pink)' : 'var(--text-dim)',
+              }}
+            >
+              {band.value}
+            </span>
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Kpi({
+  label, value, meta, hue, fill, alert, onClick,
+}: {
+  label: string
+  value: string
+  meta: string
+  hue: number
+  fill: number
+  alert?: boolean
+  onClick: () => void
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="section"
       style={{
-        display: 'flex', flexDirection: 'column', gap: 6,
-        borderColor: alert ? '#3a2b33' : undefined,
+        display: 'flex', flexDirection: 'column', gap: 5, textAlign: 'left',
+        cursor: 'pointer', fontFamily: 'inherit', color: 'inherit',
+        padding: '12px 14px', borderColor: alert ? '#3a2b33' : undefined,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
         <span
           style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: `oklch(0.76 0.13 ${hue})`, flex: 'none',
+            width: 6, height: 6, borderRadius: '50%', flex: 'none',
+            background: `oklch(0.76 0.13 ${hue})`,
           }}
         />
-        <span className="stat-label">{label}</span>
+        <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text-dimmer)' }}>
+          {label}
+        </span>
       </div>
-      <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
-        <span className="stat-value" style={{ fontSize: 28 }}>{value}</span>
-        <span style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>{unit}</span>
+      <div style={{ flex: 1 }} />
+      <div className="mono" style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-.02em' }}>
+        {value}
       </div>
-      <div
-        style={{
-          fontSize: 11.5, lineHeight: 1.4,
-          color: alert ? 'var(--warm)' : 'var(--text-dimmer)',
-        }}
-      >
-        {note}
+      <div style={{ fontSize: 11, color: 'var(--text-dimmer)', lineHeight: 1.35 }}>{meta}</div>
+      <div style={{ height: 4, borderRadius: 4, background: '#1d2331', overflow: 'hidden', marginTop: 2 }}>
+        <div
+          style={{
+            width: `${Math.min(100, Math.max(0, fill * 100))}%`, height: '100%',
+            background: `oklch(0.76 0.13 ${hue})`,
+          }}
+        />
       </div>
-    </div>
+    </button>
   )
 }
 
@@ -156,15 +496,9 @@ function Legend({ colour, label, value }: { colour: string; label: string; value
   )
 }
 
-/**
- * Money out and in, week by week.
- *
- * Paired bars rather than a line: these are discrete weekly totals, and a line
- * drawn between them would imply values on days that were never measured.
- */
 function MoneyChart({ series }: { series: { period: string; out: number; in: number }[] }) {
   const peak = Math.max(1, ...series.map((point) => Math.max(point.out, point.in)))
-  const height = 150
+  const height = 130
   const group = 100 / Math.max(1, series.length)
 
   if (series.every((point) => point.out === 0 && point.in === 0)) {
@@ -193,16 +527,12 @@ function MoneyChart({ series }: { series: { period: string; out: number; in: num
         {[0.25, 0.5, 0.75, 1].map((fraction) => (
           <line
             key={fraction}
-            x1="0"
-            x2="100"
+            x1="0" x2="100"
             y1={height - fraction * height}
             y2={height - fraction * height}
-            stroke="#1f2532"
-            strokeWidth="0.5"
-            vectorEffect="non-scaling-stroke"
+            stroke="#1f2532" strokeWidth="0.5" vectorEffect="non-scaling-stroke"
           />
         ))}
-
         {series.map((point, index) => {
           const left = index * group
           const width = group * 0.32
@@ -210,27 +540,12 @@ function MoneyChart({ series }: { series: { period: string; out: number; in: num
           const inHeight = (point.in / peak) * (height - 8)
           return (
             <g key={point.period}>
-              <rect
-                x={left + group * 0.14}
-                y={height - outHeight}
-                width={width}
-                height={outHeight}
-                fill="var(--warm)"
-                opacity={0.85}
-              />
-              <rect
-                x={left + group * 0.52}
-                y={height - inHeight}
-                width={width}
-                height={inHeight}
-                fill="var(--teal)"
-                opacity={0.85}
-              />
+              <rect x={left + group * 0.14} y={height - outHeight} width={width} height={outHeight} fill="var(--warm)" opacity={0.85} />
+              <rect x={left + group * 0.52} y={height - inHeight} width={width} height={inHeight} fill="var(--teal)" opacity={0.85} />
             </g>
           )
         })}
       </svg>
-
       <div style={{ display: 'flex', marginTop: 6 }}>
         {series.map((point, index) => (
           <span
@@ -238,7 +553,6 @@ function MoneyChart({ series }: { series: { period: string; out: number; in: num
             className="mono"
             style={{
               flex: 1, textAlign: 'center', fontSize: 9.5, color: 'var(--text-ghost)',
-              // Every other label, so they never collide at narrow widths.
               visibility: index % 2 === 0 ? 'visible' : 'hidden',
             }}
           >
@@ -248,4 +562,51 @@ function MoneyChart({ series }: { series: { period: string; out: number; in: num
       </div>
     </div>
   )
+}
+
+/** Only things that are actually true right now, most costly first. */
+function buildAttention(
+  data: DashboardView,
+  onGo: (screen: 'Inventory' | 'Shipments' | 'Purchases' | 'Settings') => void,
+): { kind: string; title: string; meta: string; go: () => void }[] {
+  const items: { kind: string; title: string; meta: string; go: () => void }[] = []
+
+  if (data.cancelled.owedMinor > 0) {
+    items.push({
+      kind: 'Refund outstanding',
+      title: `${data.cancelled.owed} owed back to you`,
+      meta: `${data.cancelled.units} cancelled units`,
+      go: () => onGo('Purchases'),
+    })
+  }
+
+  const stalled = data.aging.find((band) => band.stalled)
+  if (stalled && stalled.units > 0) {
+    items.push({
+      kind: 'Stalled capital',
+      title: `${stalled.value} sitting over 90 days`,
+      meta: `${stalled.units} units not moving`,
+      go: () => onGo('Inventory'),
+    })
+  }
+
+  if (data.inFlight.awaitingCode > 0) {
+    items.push({
+      kind: 'Awaiting tracking',
+      title: `${data.inFlight.awaitingCode} parcels without a code`,
+      meta: 'resolved automatically every few minutes',
+      go: () => onGo('Shipments'),
+    })
+  }
+
+  if (data.reviewCount > 0) {
+    items.push({
+      kind: 'Unrecognised mail',
+      title: `${data.reviewCount} emails no parser matched`,
+      meta: 'export one and a parser can be written',
+      go: () => onGo('Settings'),
+    })
+  }
+
+  return items
 }
