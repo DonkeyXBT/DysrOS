@@ -13,6 +13,7 @@ import { BOL_PARSERS } from '../core/parsers/bol.js'
 import { DHL_PARSERS } from '../core/parsers/dhl.js'
 import { POSTNL_PARSERS } from '../core/parsers/postnl.js'
 import { VINTED_PARSERS } from '../core/parsers/vinted.js'
+import { CATCHYOURCARDS_PARSERS } from '../core/parsers/catchyourcards.js'
 import { MEDIAMARKT_PARSERS } from '../core/parsers/mediamarkt.js'
 import { PROSHOP_PARSERS } from '../core/parsers/proshop.js'
 import { POCKETGAMES_PARSERS } from '../core/parsers/pocketgames.js'
@@ -118,6 +119,7 @@ export class AppService {
     ...DHL_PARSERS,
     ...POSTNL_PARSERS,
     ...VINTED_PARSERS,
+    ...CATCHYOURCARDS_PARSERS,
     ...MEDIAMARKT_PARSERS,
     ...PROSHOP_PARSERS,
     ...POCKETGAMES_PARSERS,

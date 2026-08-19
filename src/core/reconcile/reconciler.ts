@@ -63,6 +63,8 @@ export class Reconciler {
         return this.applyCancellation(event, now)
       case 'delivered':
         return this.applyDelivery(event, now)
+      case 'refunded':
+        return this.applyRefund(event, now)
       case 'sale':
         return this.applySale(event, now)
       case 'payout':
@@ -386,6 +388,52 @@ export class Reconciler {
   }
 
   /**
+   * Money coming back.
+   *
+   * A refund mail says the money is on its way, not that it has arrived, so it
+   * is recorded as owed until something says otherwise — the dashboard shows
+   * owed and received separately for exactly that reason. The order is marked
+   * refunded and its units leave stock: they are going back to the shop.
+   */
+  private applyRefund(event: StoredEvent, now: string): boolean {
+    if (!event.externalOrderId) return true
+    const payload = event.payload as Record<string, unknown>
+    const purchaseId = this.findPurchaseId(event.retailer, event.externalOrderId)
+
+    // Without the order there is nothing to attach the money to, and the
+    // amount alone says nothing about what was returned. Hold it: the order
+    // may still arrive.
+    if (!purchaseId) return false
+
+    const amount = Number(payload.amountMinor ?? payload.totalMinor ?? 0)
+    this.db.prepare(
+      `INSERT INTO refunds (id, purchase_id, currency, amount_minor, received_at, expected_at, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET
+         amount_minor = excluded.amount_minor,
+         received_at = COALESCE(excluded.received_at, refunds.received_at)`,
+    ).run(
+      event.id,
+      purchaseId,
+      (payload.currency as string) ?? 'EUR',
+      amount,
+      (payload.receivedAt as string | null) ?? null,
+      event.occurredAt,
+      now,
+    )
+
+    this.db.prepare(
+      "UPDATE purchases SET status = 'refunded' WHERE id = ? AND status != 'cancelled'",
+    ).run(purchaseId)
+    this.db.prepare(
+      `UPDATE items SET status = 'returned'
+       WHERE purchase_id = ? AND status IN ('incoming', 'in_stock', 'listed')`,
+    ).run(purchaseId)
+
+    return true
+  }
+
+  /**
    * A sale on a marketplace.
    *
    * The mail names the item and what the buyer paid; it says nothing about
@@ -542,7 +590,15 @@ export function refundKey(purchaseId: string): string {
  * the day it matters, so it is kept rather than flattened. Without a barcode
  * there is nothing to follow yet, which is what "pending" means here.
  */
+/** The statuses a parcel row may hold. A parser may state one directly. */
+const PARCEL_STATUSES = new Set([
+  'pending', 'in_transit', 'out_for_delivery', 'ready_for_pickup', 'delivered', 'exception',
+])
+
 function shipmentStatus(payload: Record<string, unknown>): string {
-  if (payload.shipmentStatus === 'out_for_delivery') return 'out_for_delivery'
+  const stated = payload.shipmentStatus
+  // Retailer parsers report their own vocabulary — "shipped_dhl" and the like
+  // — so only a status this table knows is taken at its word.
+  if (typeof stated === 'string' && PARCEL_STATUSES.has(stated)) return stated
   return payload.trackingNumber ? 'in_transit' : 'pending'
 }
