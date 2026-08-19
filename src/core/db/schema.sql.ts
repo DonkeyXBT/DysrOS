@@ -391,3 +391,16 @@ CREATE TABLE notifications_sent (
 INSERT INTO notifications_sent (event_id, event, sent_at)
 SELECT id, type, datetime('now') FROM events;
 `
+
+/**
+ * What a notification was about, as opposed to which mail carried it.
+ *
+ * A parcel's arrival is announced by the carrier and by the retailer, and both
+ * mails are real, separate events. Only one of them is news. Recording the
+ * subject alongside the event lets the second one be recognised as the same
+ * announcement and kept quiet.
+ */
+export const SCHEMA_V11 = `
+ALTER TABLE notifications_sent ADD COLUMN subject_key TEXT;
+CREATE INDEX idx_notifications_subject ON notifications_sent(subject_key);
+`

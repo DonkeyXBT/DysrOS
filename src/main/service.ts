@@ -1142,22 +1142,38 @@ export class AppService {
    * that changed status through any route — mail, a resolved barcode, a
    * re-read — is announced exactly once.
    */
-  pendingNotifications(limit = 50, now = Date.now()): { id: string; input: NotificationInput }[] {
+  pendingNotifications(
+    limit = 50,
+    now = Date.now(),
+  ): { id: string; input: NotificationInput; subject: string }[] {
     const rows = this.db.prepare(
       `SELECT e.id, e.type, e.retailer, e.external_order_id, e.occurred_at, e.payload_json,
               s.carrier AS parcel_carrier, s.tracking_number AS parcel_tracking,
               s.tracking_url AS parcel_url, s.status AS parcel_status,
-              s.expected_delivery_at AS parcel_expected, s.delivery_window AS parcel_window
+              s.id AS parcel_id,
+              s.expected_delivery_at AS parcel_expected, s.delivery_window AS parcel_window,
+              pu.retailer AS parcel_retailer, pu.title AS parcel_title,
+              (SELECT COUNT(*) FROM items i WHERE i.purchase_id = s.purchase_id) AS parcel_units,
+              (SELECT group_concat(t, ' + ') FROM
+                (SELECT DISTINCT i.title AS t FROM items i
+                  WHERE i.purchase_id = s.purchase_id LIMIT 3)) AS parcel_contents,
+              -- Where no order is linked, the mail that created the parcel
+              -- still named what is in it.
+              (SELECT json_extract(e2.payload_json, '$.title') FROM events e2
+                WHERE e2.id = s.id) AS parcel_own_title,
+              (SELECT e2.retailer FROM events e2 WHERE e2.id = s.id) AS parcel_own_retailer
        FROM events e
        LEFT JOIN shipments s
          ON s.id = COALESCE((SELECT m.into_id FROM parcel_merges m WHERE m.event_id = e.id), e.id)
+       LEFT JOIN purchases pu ON pu.id = s.purchase_id
        WHERE e.reconciled_at IS NOT NULL
          AND NOT EXISTS (SELECT 1 FROM notifications_sent n WHERE n.event_id = e.id)
        ORDER BY e.occurred_at
        LIMIT ?`,
     ).all(limit) as Record<string, unknown>[]
 
-    const pending: { id: string; input: NotificationInput }[] = []
+    const pending: { id: string; input: NotificationInput; subject: string }[] = []
+    const announcedHere = new Set<string>()
     for (const row of rows) {
       const input = toNotification({
         id: row.id as string,
@@ -1174,6 +1190,15 @@ export class AppService {
             status: (row.parcel_status as string | null) ?? null,
             expectedDeliveryAt: (row.parcel_expected as string | null) ?? null,
             deliveryWindow: (row.parcel_window as string | null) ?? null,
+            // What the parcel holds, so a delivery can say what arrived.
+            contents: (row.parcel_contents as string | null)
+              ?? (row.parcel_title as string | null)
+              ?? (row.parcel_own_title as string | null)
+              ?? null,
+            units: (row.parcel_units as number | null) ?? null,
+            retailer: (row.parcel_retailer as string | null)
+              ?? (row.parcel_own_retailer as string | null)
+              ?? null,
           }
           : null,
       })
@@ -1193,7 +1218,16 @@ export class AppService {
         continue
       }
 
-      pending.push({ id: row.id as string, input })
+      // The carrier and the retailer both announce the same arrival. Both
+      // mails are real; only one of them is news.
+      const subject = subjectKey(input, (row.parcel_id as string | null) ?? null)
+      if (announcedHere.has(subject) || this.alreadyAnnounced(subject)) {
+        this.markNotified(row.id as string, input.event, subject)
+        continue
+      }
+      announcedHere.add(subject)
+
+      pending.push({ id: row.id as string, input, subject })
     }
     return pending
   }
@@ -1219,7 +1253,7 @@ export class AppService {
     if (!url) {
       // No webhook at all is a decision: these events are recorded as said, so
       // adding one later does not replay the past.
-      for (const { id, input } of pending) this.markNotified(id, input.event)
+      for (const { id, input, subject } of pending) this.markNotified(id, input.event, subject)
       return { sent: 0, skipped: pending.length, failed: 0 }
     }
     if (!isWebhookUrl(url)) {
@@ -1235,7 +1269,7 @@ export class AppService {
     const wanted: typeof pending = []
     for (const entry of pending) {
       if (allowed.has(entry.input.event)) wanted.push(entry)
-      else this.markNotified(entry.id, entry.input.event)
+      else this.markNotified(entry.id, entry.input.event, entry.subject)
     }
     if (wanted.length === 0) return { sent: 0, skipped: pending.length, failed: 0 }
 
@@ -1252,18 +1286,27 @@ export class AppService {
         // rate limit is best answered by waiting rather than by pressing on.
         break
       }
-      for (const entry of batch) this.markNotified(entry.id, entry.input.event)
+      for (const entry of batch) {
+        this.markNotified(entry.id, entry.input.event, entry.subject)
+      }
       sent += batch.length
     }
 
     return { sent, skipped: pending.length - wanted.length, failed }
   }
 
-  private markNotified(eventId: string, event: string): void {
+  private markNotified(eventId: string, event: string, subject: string | null = null): void {
     this.db.prepare(
-      `INSERT INTO notifications_sent (event_id, event, sent_at) VALUES (?, ?, ?)
+      `INSERT INTO notifications_sent (event_id, event, subject_key, sent_at) VALUES (?, ?, ?, ?)
        ON CONFLICT(event_id) DO NOTHING`,
-    ).run(eventId, event, new Date().toISOString())
+    ).run(eventId, event, subject, new Date().toISOString())
+  }
+
+  /** True when this same thing has already been announced by another mail. */
+  private alreadyAnnounced(subject: string): boolean {
+    return this.db
+      .prepare('SELECT 1 FROM notifications_sent WHERE subject_key = ?')
+      .get(subject) !== undefined
   }
 
   async notifyDiscord(inputs: NotificationInput[]): Promise<void> {
@@ -2201,4 +2244,16 @@ function describePoint(point: ServicePoint | null, dryRun: boolean): string {
  *  the same deal twice replaces it rather than duplicating it. */
 function saleKey(itemId: string, soldAt: string): string {
   return createHash('sha256').update(`${itemId}|${soldAt}`).digest('hex').slice(0, 32)
+}
+
+/**
+ * What a notification is about.
+ *
+ * A parcel arriving is one piece of news however many mails report it, so the
+ * parcel is the subject where there is one. Without a parcel the event itself
+ * is the subject, which is the honest answer for an order or a refund.
+ */
+function subjectKey(input: NotificationInput, parcelId: string | null): string {
+  const about = parcelId ?? input.trackingNumber ?? input.reference ?? input.occurredAt
+  return `${input.event}:${input.status ?? ''}:${about}`
 }
