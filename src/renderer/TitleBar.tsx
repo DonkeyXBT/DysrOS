@@ -2,16 +2,26 @@ import { useEffect, useState } from 'react'
 import { api } from './api.js'
 import { NotificationBell, type AppNotification } from './Notifications.js'
 
+export interface SyncState {
+  title: string
+  detail: string
+  colour: string
+  progress: number | null
+}
+
 /**
  * The application's own title bar, replacing the native frame.
  *
- * The bar itself is a drag region; the buttons opt out of dragging so they stay
- * clickable. Maximised state comes from the main process rather than local
- * state, because the window can also be maximised by double-clicking the bar or
- * snapping it to a screen edge.
+ * It carries the screen name, the update and sync controls, notifications and
+ * the window buttons. The bar itself is a drag region; everything interactive
+ * opts out, or the window would move when you clicked it.
  */
 export function TitleBar({
   screen,
+  sync,
+  onSync,
+  updateAvailable,
+  updateVersion,
   onOpenUpdater,
   notifications,
   unread,
@@ -20,6 +30,10 @@ export function TitleBar({
   onCloseNotifications,
 }: {
   screen: string
+  sync: SyncState
+  onSync: () => void
+  updateAvailable: boolean
+  updateVersion: string | null
   onOpenUpdater: () => void
   notifications: AppNotification[]
   unread: number
@@ -28,35 +42,70 @@ export function TitleBar({
   onCloseNotifications: () => void
 }) {
   const [maximized, setMaximized] = useState(false)
-  const [version, setVersion] = useState('')
 
   useEffect(() => {
     void api.windowState().then((state) => setMaximized(state.maximized))
-    void api.appVersion().then((v) => setVersion(`v${v}`))
     return api.onWindowState((state) => setMaximized(state.maximized))
   }, [])
 
   return (
     <div className="titlebar">
-      <span className="titlebar-label">Resell Ops — {screen}</span>
-      <span className="titlebar-version mono">{version}</span>
+      <span className="titlebar-label">{screen}</span>
       <div style={{ flex: 1 }} />
-      <div className="titlebar-buttons">
-        <NotificationBell
-          notifications={notifications}
-          unread={unread}
-          open={notificationsOpen}
-          onToggle={onToggleNotifications}
-          onClose={onCloseNotifications}
-        />
-        <button
-          className="win-btn"
-          title="Software update"
-          onClick={onOpenUpdater}
-          aria-label="Software update"
-        >
-          <span className="win-update-dot" />
+
+      <div className="titlebar-actions">
+        {updateAvailable && (
+          <button className="pill pill-update" onClick={onOpenUpdater}>
+            <span className="pill-dot pill-dot-pulse" style={{ background: 'var(--accent)' }} />
+            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-bright)' }}>
+              Update available
+            </span>
+            {updateVersion && (
+              <span className="mono" style={{ fontSize: 10, color: 'var(--text-dimmer)' }}>
+                v{updateVersion}
+              </span>
+            )}
+          </button>
+        )}
+
+        <button className="pill" onClick={onSync} title="Sync mail now">
+          <span
+            className={`pill-dot${sync.progress !== null ? ' pill-dot-pulse' : ''}`}
+            style={{ background: sync.colour }}
+          />
+          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-mid)' }}>
+            {sync.title}
+          </span>
+          <span
+            style={{
+              fontSize: 10.5, color: 'var(--text-dimmer)', maxWidth: 220,
+              whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+            }}
+          >
+            {sync.detail}
+          </span>
+          {sync.progress !== null && (
+            <span className="pill-bar">
+              <span
+                style={{
+                  display: 'block', height: '100%', background: sync.colour,
+                  width: `${Math.min(100, Math.max(4, sync.progress))}%`,
+                }}
+              />
+            </span>
+          )}
         </button>
+      </div>
+
+      <NotificationBell
+        notifications={notifications}
+        unread={unread}
+        open={notificationsOpen}
+        onToggle={onToggleNotifications}
+        onClose={onCloseNotifications}
+      />
+
+      <div className="titlebar-buttons">
         <button
           className="win-btn"
           title="Minimize"

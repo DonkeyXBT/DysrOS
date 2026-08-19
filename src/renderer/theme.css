@@ -89,19 +89,24 @@ a:hover { color: var(--accent-bright); }
   overflow: hidden;
   padding: 0 14px 14px;
   gap: 14px;
+  transition: padding .18s ease;
 }
 
+/* The sidebar has no surface of its own: the nav items are the surface, and
+   they sit vertically centred against the window background. */
 .sidebar {
   width: 214px;
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  padding: 16px 12px 12px;
-  background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: var(--r-shell);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, .45);
+  justify-content: center;
+  gap: 4px;
+  padding: 0 0 12%;
+  background: transparent;
+  border: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .brand { display: flex; align-items: center; gap: 10px; padding: 2px 8px 16px; }
@@ -116,13 +121,15 @@ a:hover { color: var(--accent-bright); }
 
 .nav-item {
   display: flex; align-items: center; justify-content: space-between;
-  width: 100%; text-align: left; border: 0; background: transparent;
-  color: var(--text-dim); border-radius: var(--r-field);
-  padding: 9px 11px; font-family: inherit; font-size: 12.5px;
+  width: 100%; text-align: left; border: 0; background: var(--panel);
+  color: #98a0b3; border-radius: 14px;
+  padding: 11px 13px; font-family: inherit; font-size: 12.5px;
   font-weight: 500; cursor: pointer;
 }
 .nav-item:hover { background: #1b2130; }
 .nav-item.active { background: #1f2635; color: var(--text-bright); font-weight: 700; }
+.nav-icon { width: 15px; height: 15px; flex: none; opacity: .68; }
+.nav-item.active .nav-icon { opacity: 1; }
 .nav-left { display: flex; align-items: center; gap: 10px; }
 .nav-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; opacity: .45; }
 .nav-item.active .nav-dot { opacity: 1; }
@@ -292,8 +299,31 @@ a:hover { color: var(--accent-bright); }
   color: var(--text-faint);
   letter-spacing: .01em;
 }
-.titlebar-version { font-size: 10.5px; color: var(--text-ghost); }
 .titlebar-buttons { display: flex; gap: 2px; -webkit-app-region: no-drag; }
+.titlebar-actions {
+  display: flex; align-items: center; gap: 6px;
+  -webkit-app-region: no-drag; margin-right: 6px;
+}
+
+/* Update and sync live in the title bar as pills. */
+.pill {
+  display: flex; align-items: center; gap: 7px;
+  border: 1px solid var(--border-strong); background: var(--panel);
+  border-radius: 999px; padding: 5px 11px;
+  cursor: pointer; font-family: inherit;
+}
+.pill:hover { border-color: var(--border-pill); }
+.pill-update {
+  border-color: #2b3a5e;
+  background: rgba(91, 140, 255, .12);
+}
+.pill-update:hover { background: rgba(91, 140, 255, .22); }
+.pill-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
+.pill-dot-pulse { animation: pulseGlow 2s ease-in-out infinite; }
+.pill-bar {
+  display: block; width: 34px; height: 3px; border-radius: 3px;
+  background: var(--border-strong); overflow: hidden;
+}
 
 .win-btn {
   width: 40px;
@@ -451,12 +481,12 @@ a:hover { color: var(--accent-bright); }
 
 .notif-panel {
   position: absolute;
-  top: 34px; right: 0;
+  top: 36px; right: 0;
   width: 320px;
   background: var(--panel);
   border: 1px solid var(--border-input);
-  border-radius: var(--r-card);
-  box-shadow: 0 20px 50px rgba(0, 0, 0, .55);
+  border-radius: 16px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, .6);
   z-index: 70;
   overflow: hidden;
   -webkit-app-region: no-drag;
