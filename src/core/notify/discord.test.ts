@@ -35,11 +35,22 @@ function fakePost(respond: { ok?: boolean; status?: number; body?: string } = {}
 
 describe('embed shape', () => {
   it('leads with the item, since that is what identifies it at a glance', () => {
-    expect(buildEmbed(input()).title).toBe('Pokémon TCG - Ascended Heroes Booster Bundle')
+    // The action is the headline; the goods are the body.
+    expect(buildEmbed(input()).title).toBe('Shipped')
+    expect(buildEmbed(input()).description)
+      .toBe('**2× Pokémon TCG - Ascended Heroes Booster Bundle** · bol')
   })
 
-  it('falls back to the event and retailer when the item is unknown', () => {
-    expect(buildEmbed(input({ title: null })).title).toBe('Shipped · bol')
+  it('still says what happened when the item is unknown', () => {
+    const embed = buildEmbed(input({ title: null }))
+    expect(embed.title).toBe('Shipped')
+    expect(embed.description).toBe('bol')
+  })
+
+  it('leads with the parcel status when there is one', () => {
+    const embed = buildEmbed(input({ status: 'Out for delivery' }))
+    expect(embed.title).toBe('Out for delivery')
+    expect(embed.description).toContain('Pokémon')
   })
 
   it('colours each event type differently', () => {
@@ -75,8 +86,14 @@ describe('embed shape', () => {
     expect(buildEmbed(input({ amount: null })).fields.some((f) => f.name === 'Amount')).toBe(false)
   })
 
-  it('truncates a title Discord would reject', () => {
-    const embed = buildEmbed(input({ title: 'x'.repeat(400) }))
+  it('truncates a description Discord would choke on', () => {
+    const embed = buildEmbed(input({ title: 'x'.repeat(4000) }))
+    expect(embed.description!.length).toBeLessThanOrEqual(500)
+    expect(embed.description!.endsWith('…')).toBe(true)
+  })
+
+  it('truncates a status long enough to be refused as a title', () => {
+    const embed = buildEmbed(input({ status: 'x'.repeat(400) }))
     expect(embed.title.length).toBeLessThanOrEqual(240)
     expect(embed.title.endsWith('…')).toBe(true)
   })
@@ -171,7 +188,8 @@ describe('test message', () => {
   it('produces a representative embed', () => {
     const embed = buildEmbed(sampleNotification('2026-08-19T10:00:00.000Z'))
     expect(embed.fields.some((f) => f.name === 'Carrier')).toBe(true)
-    expect(embed.title).toContain('Pokémon')
+    expect(embed.title).toBe('Shipped')
+    expect(embed.description).toContain('Pokémon')
   })
 })
 

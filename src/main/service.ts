@@ -26,6 +26,7 @@ import {
 import { carrierTrackingUrl } from '../core/tracking/carrier-url.js'
 import { redirectParcel, type Page, type ServicePoint } from '../core/tracking/redirect.js'
 import { breakDownSale, vatWithinCost, NL_VAT_BASIS_POINTS } from '../core/sell.js'
+import { toNotification } from '../core/notify/from-events.js'
 import { findParcel, foldShipment, furthestStatus, mergeInto } from '../core/reconcile/shipment-merge.js'
 import {
   sendToDiscord, sampleNotification, isWebhookUrl, maskWebhookUrl,
@@ -45,6 +46,14 @@ import {
 /** Settings keys for the AYCD Inbox integration. The key setting holds the
  *  ciphertext, never the key itself. */
 const AYCD_KEY_SETTING = 'aycd_api_key_cipher'
+/**
+ * How old something can be and still be worth announcing.
+ *
+ * A first sync reaches a week back, and nobody wants last Tuesday's parcel
+ * announced as though it just happened.
+ */
+const NOTIFY_MAX_AGE_MS = 24 * 60 * 60 * 1000
+
 /** Where DHL sends the confirmation when a parcel is redirected. */
 const REDIRECT_EMAIL_SETTING = 'redirect_email'
 const AYCD_ADDRESSES_SETTING = 'aycd_addresses'
@@ -1122,6 +1131,137 @@ export class AppService {
 
   /** Posts the events a rule allows. Silent when nothing is configured, so the
    *  rest of the pipeline never has to care whether Discord is set up. */
+  /**
+   * Events that have happened and not yet been announced.
+   *
+   * Read from the reconciled record rather than from the sync, so a parcel
+   * that changed status through any route — mail, a resolved barcode, a
+   * re-read — is announced exactly once.
+   */
+  pendingNotifications(limit = 50, now = Date.now()): { id: string; input: NotificationInput }[] {
+    const rows = this.db.prepare(
+      `SELECT e.id, e.type, e.retailer, e.external_order_id, e.occurred_at, e.payload_json,
+              s.carrier AS parcel_carrier, s.tracking_number AS parcel_tracking,
+              s.tracking_url AS parcel_url, s.status AS parcel_status,
+              s.expected_delivery_at AS parcel_expected, s.delivery_window AS parcel_window
+       FROM events e
+       LEFT JOIN shipments s
+         ON s.id = COALESCE((SELECT m.into_id FROM parcel_merges m WHERE m.event_id = e.id), e.id)
+       WHERE e.reconciled_at IS NOT NULL
+         AND NOT EXISTS (SELECT 1 FROM notifications_sent n WHERE n.event_id = e.id)
+       ORDER BY e.occurred_at
+       LIMIT ?`,
+    ).all(limit) as Record<string, unknown>[]
+
+    const pending: { id: string; input: NotificationInput }[] = []
+    for (const row of rows) {
+      const input = toNotification({
+        id: row.id as string,
+        type: row.type as string,
+        retailer: row.retailer as string,
+        externalOrderId: (row.external_order_id as string | null) ?? null,
+        occurredAt: row.occurred_at as string,
+        payload: JSON.parse(row.payload_json as string) as Record<string, unknown>,
+        parcel: row.parcel_status
+          ? {
+            carrier: (row.parcel_carrier as string | null) ?? null,
+            trackingNumber: (row.parcel_tracking as string | null) ?? null,
+            trackingUrl: (row.parcel_url as string | null) ?? null,
+            status: (row.parcel_status as string | null) ?? null,
+            expectedDeliveryAt: (row.parcel_expected as string | null) ?? null,
+            deliveryWindow: (row.parcel_window as string | null) ?? null,
+          }
+          : null,
+      })
+      // An event nobody asked to hear about is still marked, so it is not
+      // reconsidered on every pass for the rest of its life.
+      if (!input) {
+        this.markNotified(row.id as string, row.type as string)
+        continue
+      }
+
+      // A notification is news. Mail collected for the first time can be weeks
+      // deep, and announcing a delivery that happened last Tuesday is noise —
+      // it is recorded as said, and only what is actually recent goes out.
+      const age = now - Date.parse(input.occurredAt)
+      if (Number.isFinite(age) && age > NOTIFY_MAX_AGE_MS) {
+        this.markNotified(row.id as string, input.event)
+        continue
+      }
+
+      pending.push({ id: row.id as string, input })
+    }
+    return pending
+  }
+
+  /**
+   * Announces what has happened since the last time.
+   *
+   * Discord takes at most ten embeds in a message, so this goes in tens, and a
+   * batch is only marked as sent once Discord has actually accepted it — a
+   * failed send is worth repeating, an announced delivery is not.
+   *
+   * With no webhook configured, everything is marked as seen without being
+   * sent. Otherwise the day someone adds a webhook they would be told about
+   * every parcel of the past month at once.
+   */
+  async flushNotifications(
+    options: { send?: typeof sendToDiscord; limit?: number } = {},
+  ): Promise<{ sent: number; skipped: number; failed: number }> {
+    const pending = this.pendingNotifications(options.limit ?? 50)
+    if (pending.length === 0) return { sent: 0, skipped: 0, failed: 0 }
+
+    const url = this.discordWebhook()
+    if (!url) {
+      // No webhook at all is a decision: these events are recorded as said, so
+      // adding one later does not replay the past.
+      for (const { id, input } of pending) this.markNotified(id, input.event)
+      return { sent: 0, skipped: pending.length, failed: 0 }
+    }
+    if (!isWebhookUrl(url)) {
+      // A webhook is configured but cannot be read — a stored value that no
+      // longer decrypts, most likely. Nothing is marked: losing notifications
+      // silently over a fixable problem is the worst of both.
+      return { sent: 0, skipped: 0, failed: pending.length }
+    }
+
+    const allowed = new Set(
+      this.discordSettings().rules.filter((rule) => rule.enabled).map((rule) => rule.event),
+    )
+    const wanted: typeof pending = []
+    for (const entry of pending) {
+      if (allowed.has(entry.input.event)) wanted.push(entry)
+      else this.markNotified(entry.id, entry.input.event)
+    }
+    if (wanted.length === 0) return { sent: 0, skipped: pending.length, failed: 0 }
+
+    const send = options.send ?? sendToDiscord
+    let sent = 0
+    let failed = 0
+
+    for (let index = 0; index < wanted.length; index += 10) {
+      const batch = wanted.slice(index, index + 10)
+      const result = await send(url, batch.map((entry) => entry.input))
+      if (!result.ok) {
+        failed += batch.length
+        // Stop at the first refusal: the rest would fail the same way, and a
+        // rate limit is best answered by waiting rather than by pressing on.
+        break
+      }
+      for (const entry of batch) this.markNotified(entry.id, entry.input.event)
+      sent += batch.length
+    }
+
+    return { sent, skipped: pending.length - wanted.length, failed }
+  }
+
+  private markNotified(eventId: string, event: string): void {
+    this.db.prepare(
+      `INSERT INTO notifications_sent (event_id, event, sent_at) VALUES (?, ?, ?)
+       ON CONFLICT(event_id) DO NOTHING`,
+    ).run(eventId, event, new Date().toISOString())
+  }
+
   async notifyDiscord(inputs: NotificationInput[]): Promise<void> {
     const url = this.discordWebhook()
     if (!url || inputs.length === 0) return

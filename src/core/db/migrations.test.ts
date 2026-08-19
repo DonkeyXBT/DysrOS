@@ -120,3 +120,33 @@ describe('v5 repairs tracking codes that swallowed the postcode', () => {
       .toEqual({ tracking_number: null })
   })
 })
+
+describe('v10 treats what was already collected as already said', () => {
+  it('marks existing events as announced, so an upgrade is not a burst', () => {
+    const db = openDatabase(':memory:')
+    db.exec('CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)')
+    for (const migration of MIGRATIONS.filter((m) => m.version <= 9)) {
+      db.exec(migration.sql)
+      db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version)
+    }
+    db.prepare(
+      `INSERT INTO accounts (id, label, email, provider, host, port, username, secret_cipher, created_at)
+       VALUES ('local-import','Imported files','local@import','custom','',0,'','','2026-08-01T00:00:00.000Z')`,
+    ).run()
+    db.prepare(
+      `INSERT INTO messages (id, account_id, uid, folder, message_id, content_hash, from_address,
+                             from_name, subject, received_at, raw_path, parse_status, parser_id)
+       VALUES ('m1','local-import',0,'IMPORT','<a>','hash-1','automail@bol.com','bol','Verzonden',
+               '2026-08-01T00:00:00.000Z','','parsed','bol')`,
+    ).run()
+    db.prepare(
+      `INSERT INTO events (id, message_id, parser_id, type, retailer, external_order_id,
+                           occurred_at, payload_json, created_at)
+       VALUES ('e1','m1','bol','shipped','bol','C1','2026-08-01T00:00:00.000Z','{}','2026-08-01T00:00:00.000Z')`,
+    ).run()
+
+    migrate(db)
+
+    expect(db.prepare('SELECT COUNT(*) AS n FROM notifications_sent').get()).toEqual({ n: 1 })
+  })
+})

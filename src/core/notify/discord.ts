@@ -34,6 +34,10 @@ export interface NotificationInput {
   trackingNumber?: string | null
   trackingUrl?: string | null
   expectedDeliveryAt?: string | null
+  /** `17:00–19:00`, when the courier has given one. */
+  deliveryWindow?: string | null
+  /** Where the parcel has got to, when that is the news itself. */
+  status?: string | null
   occurredAt: string
 }
 
@@ -77,6 +81,8 @@ const HEADLINE: Record<NotifiableEvent, string> = {
 
 /** Discord rejects an embed title over 256 characters outright. */
 const MAX_TITLE = 240
+/** Descriptions may run to 4096, but a product name that long is a wall. */
+const MAX_DESCRIPTION = 500
 
 export function buildEmbed(input: NotificationInput): DiscordEmbed {
   const fields: DiscordEmbed['fields'] = []
@@ -98,17 +104,34 @@ export function buildEmbed(input: NotificationInput): DiscordEmbed {
     fields.push({ name: 'Tracking', value: `[Follow the parcel](${input.trackingUrl})`, inline: false })
   }
   if (input.expectedDeliveryAt) {
-    fields.push({ name: 'Expected', value: input.expectedDeliveryAt, inline: true })
+    fields.push({
+      name: 'Expected',
+      value: input.deliveryWindow
+        ? `${input.expectedDeliveryAt} · ${input.deliveryWindow}`
+        : input.expectedDeliveryAt,
+      inline: true,
+    })
+  } else if (input.deliveryWindow) {
+    fields.push({ name: 'Expected', value: input.deliveryWindow, inline: true })
   }
   if (input.reference) {
     fields.push({ name: 'Order', value: `\`${input.reference}\``, inline: true })
   }
 
-  const title = input.title ?? `${HEADLINE[input.event]} · ${input.retailer}`
+  // The title says what happened; the description says what it happened to.
+  // Read in a busy channel, the action is the thing scanned for, and a product
+  // name as the headline makes every notice look the same.
+  const title = input.status ?? HEADLINE[input.event]
+  const what = input.quantity && input.quantity > 1 && input.title
+    ? `${input.quantity}× ${input.title}`
+    : input.title
+  const description = what ? `**${what}** · ${input.retailer}` : `${input.retailer}`
 
   return {
     title: title.length > MAX_TITLE ? `${title.slice(0, MAX_TITLE - 1)}…` : title,
-    description: `**${HEADLINE[input.event]}** · ${input.retailer}`,
+    description: description.length > MAX_DESCRIPTION
+      ? `${description.slice(0, MAX_DESCRIPTION - 1)}…`
+      : description,
     ...(input.trackingUrl && !input.trackingNumber ? {} : {}),
     color: COLOUR[input.event],
     fields,

@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AppService } from './service.js'
 import type { CompletedTask, MailTask } from '../core/aycd/client.js'
+import type { NotificationInput, sendToDiscord } from '../core/notify/discord.js'
 import type { WatcherClock } from '../core/aycd/watcher.js'
 
 const FIXTURES = [
@@ -1226,5 +1227,152 @@ describe.skipIf(!allPresent)('the courier window reaches the parcel it belongs t
   it('never invents a carrier for a mail that names none', async () => {
     await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
     expect(service.listShipments()[0]!.carrier).toBe('unknown')
+  })
+})
+
+describe.skipIf(!allPresent)('telling Discord what happened', () => {
+  const WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz'
+
+  /** Stands in for Discord, and records exactly what it was asked to post. */
+  function recorder() {
+    const batches: { url: string; inputs: NotificationInput[] }[] = []
+    const send: typeof sendToDiscord = async (url, inputs) => {
+      batches.push({ url, inputs: [...inputs] })
+      return { ok: true, message: 'sent' }
+    }
+    return { batches, send }
+  }
+
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('sends an embed for every shipment and order once mail has been read', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await importAll()
+
+    const { batches, send } = recorder()
+    const result = await service.flushNotifications({ send })
+
+    expect(result.sent).toBeGreaterThan(0)
+    expect(batches.length).toBeGreaterThan(0)
+    expect(batches[0]!.url).toBe(WEBHOOK)
+    expect(batches.flatMap((batch) => batch.inputs).map((input) => input.event))
+      .toContain('shipped')
+  })
+
+  it('never says the same thing twice, however often the mail is read again', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await importAll()
+
+    const first = recorder()
+    const sent = await service.flushNotifications({ send: first.send })
+    expect(sent.sent).toBeGreaterThan(0)
+
+    const second = recorder()
+    expect(await service.flushNotifications({ send: second.send }))
+      .toMatchObject({ sent: 0 })
+    expect(second.batches).toEqual([])
+
+    // Re-reading every stored message must not announce the past all over again.
+    await service.reparseAll()
+    const third = recorder()
+    expect(await service.flushNotifications({ send: third.send })).toMatchObject({ sent: 0 })
+  })
+
+  it('says a parcel is out for delivery rather than merely shipped', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+
+    const { batches, send } = recorder()
+    await service.flushNotifications({ send })
+
+    const inputs = batches.flatMap((batch) => batch.inputs)
+    expect(inputs.some((input) => input.status === 'Out for delivery')).toBe(true)
+  })
+
+  it('stays quiet with no webhook, and does not save up the backlog for later', async () => {
+    await importAll()
+
+    const { batches, send } = recorder()
+    expect(await service.flushNotifications({ send })).toMatchObject({ sent: 0 })
+    expect(batches).toEqual([])
+
+    // Connecting a webhook afterwards must not announce last month at once.
+    service.setDiscordWebhook(WEBHOOK)
+    const later = recorder()
+    expect(await service.flushNotifications({ send: later.send })).toMatchObject({ sent: 0 })
+  })
+
+  it('obeys the rules: an event switched off is not sent', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    for (const rule of service.discordSettings().rules) {
+      service.setDiscordRule(rule.event, false)
+    }
+    await importAll()
+
+    const { batches, send } = recorder()
+    const result = await service.flushNotifications({ send })
+    expect(batches).toEqual([])
+    expect(result.sent).toBe(0)
+    expect(result.skipped).toBeGreaterThan(0)
+  })
+
+  it('keeps an unaccepted batch for the next attempt rather than losing it', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await importAll()
+
+    const failing: typeof sendToDiscord = async () =>
+      ({ ok: false, message: 'Discord rate limited this webhook.' })
+    const result = await service.flushNotifications({ send: failing })
+    expect(result.failed).toBeGreaterThan(0)
+    expect(result.sent).toBe(0)
+
+    const { batches, send } = recorder()
+    const retry = await service.flushNotifications({ send })
+    expect(retry.sent).toBeGreaterThan(0)
+    expect(batches.length).toBeGreaterThan(0)
+  })
+
+  it('does not announce mail that is already old news', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await importAll()
+
+    // A week later, none of this is news any more.
+    const later = Date.parse('2026-08-26T09:00:00.000Z')
+    expect(service.pendingNotifications(100, later)).toEqual([])
+
+    const { batches, send } = recorder()
+    expect(await service.flushNotifications({ send })).toMatchObject({ sent: 0 })
+    expect(batches).toEqual([])
+  })
+
+  it('keeps notifications when the stored webhook cannot be read', async () => {
+    // A cipher that no longer decrypts: the events are still owed, so they are
+    // not quietly written off.
+    service.setSetting('discord_webhook_cipher', 'not-a-webhook-url')
+    await importAll()
+
+    const { batches, send } = recorder()
+    const result = await service.flushNotifications({ send })
+    expect(batches).toEqual([])
+    expect(result.failed).toBeGreaterThan(0)
+    expect(result.sent).toBe(0)
+
+    // Once it is readable again, they go out.
+    service.setDiscordWebhook(WEBHOOK)
+    const retry = recorder()
+    expect((await service.flushNotifications({ send: retry.send })).sent).toBeGreaterThan(0)
+  })
+
+  it('sends in tens, which is all Discord accepts in one message', async () => {
+    service.setDiscordWebhook(WEBHOOK)
+    await importAll()
+    // Enough events to need more than one message.
+    expect(service.pendingNotifications(100).length).toBeGreaterThan(0)
+
+    const { batches, send } = recorder()
+    await service.flushNotifications({ send, limit: 100 })
+    expect(batches.every((batch) => batch.inputs.length <= 10)).toBe(true)
   })
 })

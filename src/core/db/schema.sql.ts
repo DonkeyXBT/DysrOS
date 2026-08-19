@@ -370,3 +370,24 @@ CREATE TABLE parcel_merges (
   created_at      TEXT NOT NULL
 );
 `
+
+/**
+ * Which events have already been announced.
+ *
+ * Notifications must go out once: mail is re-read after every upgrade, and
+ * without a record of what was already said, each re-read would announce
+ * months of deliveries again.
+ */
+export const SCHEMA_V10 = `
+CREATE TABLE notifications_sent (
+  event_id TEXT PRIMARY KEY,
+  event    TEXT NOT NULL,
+  sent_at  TEXT NOT NULL
+);
+
+-- Everything collected before notifications worked counts as already said.
+-- Otherwise the first run after this upgrade would announce every delivery of
+-- the past month in one burst.
+INSERT INTO notifications_sent (event_id, event, sent_at)
+SELECT id, type, datetime('now') FROM events;
+`
