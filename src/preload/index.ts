@@ -7,6 +7,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 const api = {
   summary: () => ipcRenderer.invoke('summary'),
   shipments: () => ipcRenderer.invoke('shipments'),
+  dashboard: () => ipcRenderer.invoke('dashboard'),
   inventory: () => ipcRenderer.invoke('inventory'),
   purchases: () => ipcRenderer.invoke('purchases'),
   cancellations: () => ipcRenderer.invoke('cancellations'),

@@ -570,3 +570,54 @@ describe.skipIf(!allPresent)('shipments matched to orders', () => {
     expect(service.listShipments().every((s) => s.linkedToPurchase === false)).toBe(true)
   })
 })
+
+describe.skipIf(!allPresent)('dashboard reports the operation, not the plumbing', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('counts what was bought rather than how many emails arrived', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    expect(dashboard.bought.orders).toBe(2)
+    expect(dashboard.bought.units).toBe(4)
+    expect(dashboard.bought.spend).toBe('€176.95')
+  })
+
+  it('counts what is still coming', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    expect(dashboard.inFlight.units).toBe(4)
+    expect(dashboard.inFlight.parcels).toBe(2)
+    expect(dashboard.inFlight.awaitingCode).toBe(2)
+  })
+
+  it('keeps money owed back separate from money received', async () => {
+    await importAll()
+    const dashboard = service.dashboard()
+    // A refund that has not arrived is owed, not received; counting it as
+    // income would overstate what came in.
+    expect(dashboard.money.in).toBe('€0.00')
+  })
+
+  it('produces one point per week for the chart', async () => {
+    await importAll()
+    expect(service.dashboard(12).series).toHaveLength(12)
+    expect(service.dashboard(4).series).toHaveLength(4)
+  })
+
+  it('puts spending in the week it happened', async () => {
+    await importAll()
+    const series = service.dashboard(52).series
+    const spent = series.reduce((total, point) => total + point.out, 0)
+    // Both orders fall inside a year, so the series must account for all of it.
+    expect(spent).toBe(17695)
+  })
+
+  it('reports zeroes rather than failing on an empty database', () => {
+    const dashboard = service.dashboard()
+    expect(dashboard.bought.orders).toBe(0)
+    expect(dashboard.money.out).toBe('€0.00')
+    expect(dashboard.series.every((p) => p.out === 0 && p.in === 0)).toBe(true)
+  })
+})
