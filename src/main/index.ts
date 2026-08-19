@@ -322,12 +322,17 @@ app.whenReady().then(() => {
 
   // Mail read by an older set of parsers is read again, from the raw copy kept
   // for exactly this, so what the parsers learned since applies to it too.
-  if (service.needsReparse()) {
+  if (service.needsReparse(app.getVersion())) {
     activity.start('reparse', 'Re-reading stored mail', 'applying what the parsers learned')
-    void service.reparseAll().then((result) => {
-      service.markReparsed()
+    void service.reparseAll().then(async (result) => {
+      service.markReparsed(app.getVersion())
       activity.finish('reparse', `${result.reparsed} of ${result.examined} re-read`)
       if (result.reparsed > 0) mainWindow?.webContents.send('mail-updated', result)
+      // Re-reading rebuilds parcels from their mail, so mail about a parcel
+      // already recorded briefly stands on its own again. Following the links
+      // straight away pairs them back up rather than leaving the list doubled
+      // until the next sweep comes round.
+      await sweepTracking('after re-reading')
     }).catch((error: unknown) => {
       log?.record('error', 'reparse', error)
       activity.finish('reparse', 'could not re-read stored mail', false)

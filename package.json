@@ -1,6 +1,6 @@
 {
   "name": "dysros",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Local-first desktop tracker for a reselling operation: reads your mailboxes and turns order, shipping, cancellation and refund mail into inventory, purchases and shipments.",
   "scripts": {
     "test": "vitest run",

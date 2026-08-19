@@ -43,6 +43,8 @@ export interface ShipmentFacts {
   trackingUrl?: string | null
   postalCode?: string | null
   expectedDeliveryAt?: string | null
+  /** `17:00–19:00`, which only the out-for-delivery mail ever states. */
+  deliveryWindow?: string | null
   lastPolledAt?: string | null
 }
 
@@ -69,6 +71,7 @@ export function mergeInto(
          tracking_url = COALESCE(?, tracking_url),
          postal_code = COALESCE(?, postal_code),
          expected_delivery_at = COALESCE(?, expected_delivery_at),
+         delivery_window = COALESCE(?, delivery_window),
          last_polled_at = COALESCE(?, last_polled_at)
      WHERE id = ?`,
   ).run(
@@ -77,16 +80,59 @@ export function mergeInto(
     facts.trackingUrl ?? null,
     facts.postalCode ?? null,
     facts.expectedDeliveryAt ?? null,
+    facts.deliveryWindow ?? null,
     facts.lastPolledAt ?? null,
     keepId,
   )
+}
+
+/** The parcel a given mail was found to belong to, if that is already known. */
+export function mergedInto(db: Database.Database, eventId: string): string | null {
+  const row = db
+    .prepare('SELECT into_id FROM parcel_merges WHERE event_id = ?')
+    .get(eventId) as { into_id: string } | undefined
+  return row?.into_id ?? null
+}
+
+/** Remembers that a mail belongs to a parcel another mail recorded. */
+export function rememberMerge(db: Database.Database, eventId: string, intoId: string): void {
+  db.prepare(
+    `INSERT INTO parcel_merges (event_id, into_id, tracking_number, created_at)
+     VALUES (?, ?, (SELECT tracking_number FROM shipments WHERE id = ?), ?)
+     ON CONFLICT(event_id) DO UPDATE SET into_id = excluded.into_id`,
+  ).run(eventId, intoId, intoId, new Date().toISOString())
+}
+
+/**
+ * The parcel an out-for-delivery mail is about, where that is unambiguous.
+ *
+ * "The courier is on the way with your parcel" is never the first anyone hears
+ * of a parcel — a handover mail came first and made the row. So when exactly
+ * one parcel of that order is with that carrier, this mail is about that one,
+ * and saying so needs no network round trip. Where an order went out in
+ * several parcels there is nothing to pick between, so nothing is picked: the
+ * barcodes settle it later.
+ */
+export function soleParcelOfOrder(
+  db: Database.Database,
+  retailer: string,
+  externalOrderId: string,
+  exceptId: string,
+): string | null {
+  const rows = db.prepare(
+    `SELECT s.id FROM shipments s
+     JOIN events e ON e.id = s.id
+     WHERE e.retailer = ? AND e.external_order_id = ? AND s.id != ?`,
+  ).all(retailer, externalOrderId, exceptId) as { id: string }[]
+  return rows.length === 1 ? rows[0]!.id : null
 }
 
 /** Folds one shipment row into another and removes the duplicate. */
 export function foldShipment(db: Database.Database, duplicateId: string, keepId: string): void {
   const duplicate = db
     .prepare(
-      `SELECT status, purchase_id, tracking_url, postal_code, expected_delivery_at, last_polled_at
+      `SELECT status, purchase_id, tracking_url, postal_code, expected_delivery_at,
+              delivery_window, last_polled_at
        FROM shipments WHERE id = ?`,
     )
     .get(duplicateId) as Record<string, string | null> | undefined
@@ -98,7 +144,12 @@ export function foldShipment(db: Database.Database, duplicateId: string, keepId:
     trackingUrl: duplicate.tracking_url ?? null,
     postalCode: duplicate.postal_code ?? null,
     expectedDeliveryAt: duplicate.expected_delivery_at ?? null,
+    deliveryWindow: duplicate.delivery_window ?? null,
     lastPolledAt: duplicate.last_polled_at ?? null,
   })
   db.prepare('DELETE FROM shipments WHERE id = ?').run(duplicateId)
+
+  // Remembered, because this pairing cost a network round trip to learn and a
+  // rebuild would otherwise recreate the duplicate row and ask again.
+  rememberMerge(db, duplicateId, keepId)
 }

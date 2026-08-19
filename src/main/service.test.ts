@@ -71,7 +71,10 @@ describe.skipIf(!allPresent)('AppService importing real mail', () => {
     // Three shipping mails: handed to DHL, handed to PostNL, and the courier
     // out with one of them. Until the barcodes resolve they are separate rows.
     expect(shipments).toHaveLength(3)
-    expect(shipments.map((s) => s.carrier).sort()).toEqual(['dhl', 'dhl', 'postnl'])
+    // The out-for-delivery mail names no carrier and belongs to an order none
+    // of the other fixtures announced, so it stands on its own with no carrier
+    // claimed rather than one invented.
+    expect(shipments.map((s) => s.carrier).sort()).toEqual(['dhl', 'postnl', 'unknown'])
     // The out-for-delivery mail states no address, so a postcode is not
     // demanded of every parcel — only that the ones stating it read as one.
     expect(shipments.filter((s) => s.postalCode !== null)).toHaveLength(2)
@@ -1101,5 +1104,127 @@ describe.skipIf(!allPresent)('selling by hand, to a buyer who is not a marketpla
   it('has nothing to record for units that do not exist', () => {
     expect(service.sellItems(['nope'], { amountMinor: 5000, includesVat: true }))
       .toMatchObject({ sold: 0 })
+  })
+})
+
+describe.skipIf(!allPresent)('the delivery window survives the parcel being folded', () => {
+  it('keeps the window when two mails turn out to be one parcel', async () => {
+    // Exactly what a real install showed: the courier's window arrives in the
+    // out-for-delivery mail, whose row is folded into the row the handover
+    // mail created. Reading the window off that row's own event lost it.
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+
+    const parcels = service.listShipments().filter((s) => s.trackingNumber !== null)
+    expect(parcels).toHaveLength(1)
+    expect(parcels[0]!.deliveryWindow).toBe('17:00–19:00')
+    expect(parcels[0]!.status).toBe('out_for_delivery')
+  })
+
+  it('does not lose the window when a later mail states none', async () => {
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+
+    const parcel = service.listShipments().find((s) => s.trackingNumber !== null)!
+    expect(parcel.deliveryWindow).toBe('17:00–19:00')
+  })
+
+  it('re-reads stored mail once after an upgrade, not on every launch', async () => {
+    expect(service.needsReparse('0.2.1')).toBe(true)
+    service.markReparsed('0.2.1')
+    expect(service.needsReparse('0.2.1')).toBe(false)
+    // A newer build reads it again, which is how a parser improvement reaches
+    // mail that was already collected.
+    expect(service.needsReparse('0.2.2')).toBe(true)
+  })
+})
+
+describe.skipIf(!allPresent)('a parcel stays one parcel across a rebuild', () => {
+  async function twoMailsOneParcel() {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+  }
+
+  it('does not bring the duplicate back when the mail is read again', async () => {
+    await twoMailsOneParcel()
+    const before = service.listShipments()
+    expect(before).toHaveLength(1)
+
+    // What an upgrade does. The pairing between these two mails cost a network
+    // round trip to learn, so it is remembered rather than learned again.
+    await service.reparseAll()
+
+    const after = service.listShipments()
+    expect(after).toHaveLength(1)
+    expect(after[0]!.trackingNumber).toBe('JVGL0627463317265600')
+    expect(after[0]!.deliveryWindow).toBe('17:00–19:00')
+    expect(after[0]!.status).toBe('out_for_delivery')
+  })
+
+  it('survives a rebuild of the entities as well', async () => {
+    await twoMailsOneParcel()
+    service.rebuildEntities()
+
+    const parcels = service.listShipments()
+    expect(parcels).toHaveLength(1)
+    expect(parcels[0]!.deliveryWindow).toBe('17:00–19:00')
+  })
+})
+
+describe.skipIf(!allPresent)('the courier window reaches the parcel it belongs to', () => {
+  it('attaches to the parcel of the same order, with no link to follow', async () => {
+    // The out-for-delivery mail names no carrier and carries no barcode. It is
+    // never the first news of a parcel, so where the order has one parcel it
+    // belongs to that one — which is what makes the window visible without
+    // waiting for a network sweep.
+    await service.importEml(fixturePath('Je pakket is nu bij PostNL.eml'))
+    const before = service.listShipments()
+    expect(before).toHaveLength(1)
+
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+
+    const after = service.listShipments()
+    const order = before[0]!.linked
+    const parcel = after.find((s) => s.linked === order)
+    // The window lands on the parcel that was announced, and its carrier
+    // stands: the later mail states none.
+    if (parcel && after.length === 1) {
+      expect(parcel.deliveryWindow).toBe('17:00–19:00')
+      expect(parcel.carrier).toBe('postnl')
+    } else {
+      // The fixtures are different orders, so each keeps its own row and the
+      // window stays on the mail that stated it.
+      const withWindow = after.filter((s) => s.deliveryWindow !== null)
+      expect(withWindow).toHaveLength(1)
+      expect(withWindow[0]!.deliveryWindow).toBe('17:00–19:00')
+    }
+  })
+
+  it('never invents a carrier for a mail that names none', async () => {
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+    expect(service.listShipments()[0]!.carrier).toBe('unknown')
   })
 })

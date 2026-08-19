@@ -147,20 +147,22 @@ export class AppService {
   /**
    * What the parsers extracted when the stored events were made.
    *
-   * Bump this when a parser starts extracting something it did not before.
-   * Stored events are not revisited otherwise, so mail already read would keep
-   * its old, thinner event — the product pictures added in 0.1.6 would only
-   * ever appear on mail that arrived afterwards.
+   * This used to be a number to bump by hand, and the hand forgot: 0.2.0 taught
+   * the parsers about delivery windows and about DHL's own mail, and every
+   * message already stored kept its older, thinner event. So the marker is the
+   * application's version instead. Mail already read is read again once after
+   * every upgrade, which costs seconds in the background and means a parser
+   * improvement always reaches the mail it was written for.
    */
-  static readonly PARSER_GENERATION = '2'
+  static readonly PARSER_GENERATION = 'dev'
 
-  /** True when the mail already read predates the current parsers. */
-  needsReparse(): boolean {
-    return this.getSetting('parser_generation') !== AppService.PARSER_GENERATION
+  /** True when the mail already read was read by an older build. */
+  needsReparse(generation: string = AppService.PARSER_GENERATION): boolean {
+    return this.getSetting('parser_generation') !== generation
   }
 
-  markReparsed(): void {
-    this.setSetting('parser_generation', AppService.PARSER_GENERATION)
+  markReparsed(generation: string = AppService.PARSER_GENERATION): void {
+    this.setSetting('parser_generation', generation)
   }
 
   getSetting(key: string): string | null {
@@ -463,7 +465,11 @@ export class AppService {
         status: trackingNumber && row.status === 'pending' ? 'in_transit' : (row.status as string),
         lastMovementAt: (row.last_movement_at as string | null) ?? null,
         expectedDeliveryAt: (row.expected_delivery_at as string | null) ?? null,
-        deliveryWindow: (payload.deliveryWindow as string | null) ?? null,
+        // The parcel's own record first: the mail that stated the window may
+        // have been folded into this parcel rather than being its own row.
+        deliveryWindow: (row.delivery_window as string | null)
+          ?? (payload.deliveryWindow as string | null)
+          ?? null,
         postalCode,
         city: (payload.deliveryCity as string | null) ?? null,
         // Redirectable means it can be done now: DHL, barcode and postcode
