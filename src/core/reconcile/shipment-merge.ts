@@ -17,7 +17,12 @@ import type Database from 'better-sqlite3'
 
 /** How far along a parcel is, least to most. A later mail may say less than an
  *  earlier one — a delivered parcel never goes back to being in transit. */
-const PROGRESS = ['pending', 'in_transit', 'out_for_delivery', 'delivered']
+const PROGRESS = [
+  'pending', 'in_transit', 'out_for_delivery',
+  // At a ServicePoint the parcel has arrived somewhere, but not with you.
+  'ready_for_pickup',
+  'delivered',
+]
 
 export function furthestStatus(a: string | null, b: string | null): string {
   const rank = (status: string | null) => PROGRESS.indexOf(status ?? 'pending')

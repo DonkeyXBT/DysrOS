@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { AppService } from './service.js'
 import type { CompletedTask, MailTask } from '../core/aycd/client.js'
 import type { NotificationInput, sendToDiscord } from '../core/notify/discord.js'
+import type { Fetcher } from '../core/tracking/dhl-status.js'
 import type { WatcherClock } from '../core/aycd/watcher.js'
 
 const FIXTURES = [
@@ -1374,5 +1375,139 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     const { batches, send } = recorder()
     await service.flushNotifications({ send, limit: 100 })
     expect(batches.every((batch) => batch.inputs.length <= 10)).toBe(true)
+  })
+})
+
+describe.skipIf(!allPresent)('a delivery settles the parcel and the stock', () => {
+  it('marks the parcel delivered when the carrier says so, by barcode alone', async () => {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0637312004384176',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0637312004384176',
+      }),
+    })
+    expect(service.listShipments()[0]!.status).not.toBe('delivered')
+
+    // DHL's own delivery mail carries the barcode and no order reference.
+    await service.importEml(fixturePath('Je_pakket_is_bezorgd_dhl.eml'))
+
+    const parcels = service.listShipments()
+    expect(parcels).toHaveLength(1)
+    expect(parcels[0]!.status).toBe('delivered')
+  })
+
+  it('moves what was incoming into stock', async () => {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    expect(service.listInventory().every((item) => item.status === 'incoming')).toBe(true)
+
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0637312004384176',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0637312004384176',
+      }),
+    })
+    await service.importEml(fixturePath('Je_pakket_is_bezorgd_dhl.eml'))
+
+    const parcel = service.listShipments()[0]!
+    expect(parcel.status).toBe('delivered')
+    if (parcel.linkedToPurchase) {
+      expect(service.listInventory().every((item) => item.status === 'in_stock')).toBe(true)
+    }
+  })
+
+  it('records a parcel even when its delivery mail is the first thing seen', async () => {
+    await service.importEml(fixturePath('Afgeleverd_je_pakket_van_bol_postnl.eml'))
+
+    const parcels = service.listShipments()
+    expect(parcels).toHaveLength(1)
+    expect(parcels[0]).toMatchObject({
+      carrier: 'postnl',
+      trackingNumber: '3STUNM283074965',
+      status: 'delivered',
+    })
+  })
+})
+
+describe.skipIf(!allPresent)('asking DHL about parcels still out', () => {
+  async function parcelInTransit() {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0637312004384176',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0637312004384176',
+      }),
+    })
+  }
+
+  /** Stands in for DHL, and records which barcodes it was asked about. */
+  function answering(body: unknown) {
+    const asked: string[] = []
+    const fetcher: Fetcher = async (url) => {
+      asked.push(url)
+      return { ok: true, status: 200, json: async () => body }
+    }
+    return { asked, fetcher }
+  }
+
+  it('moves a parcel on when DHL says it was delivered', async () => {
+    await parcelInTransit()
+    const { asked, fetcher } = answering([{
+      deliveredAt: '2026-08-19T15:30:00Z',
+      events: [{ status: 'DELIVERED', category: 'DELIVERED', timestamp: '2026-08-19T15:30:00Z' }],
+    }])
+
+    const result = await service.pollCarrierStatus({ fetcher })
+
+    expect(asked[0]).toContain('JVGL0637312004384176')
+    expect(result).toMatchObject({ asked: 1, moved: 1, delivered: 1, failed: 0 })
+    expect(service.listShipments()[0]!.status).toBe('delivered')
+  })
+
+  it('never moves a parcel backwards', async () => {
+    await parcelInTransit()
+    await service.pollCarrierStatus({
+      fetcher: answering([{ events: [{ status: 'DELIVERED', category: 'DELIVERED', timestamp: '2026-08-19T15:30:00Z' }] }]).fetcher,
+    })
+
+    // A later answer that knows less must not undo it.
+    await service.pollCarrierStatus({
+      fetcher: answering([{ events: [{ status: 'SHIPMENT_SORTED', category: 'UNDERWAY', timestamp: '2026-08-18T09:00:00Z' }] }]).fetcher,
+    })
+
+    expect(service.listShipments()[0]!.status).toBe('delivered')
+  })
+
+  it('leaves a parcel alone when DHL does not know the barcode', async () => {
+    await parcelInTransit()
+    const before = service.listShipments()[0]!.status
+
+    const result = await service.pollCarrierStatus({ fetcher: answering([]).fetcher })
+
+    expect(result).toMatchObject({ moved: 0, delivered: 0 })
+    expect(service.listShipments()[0]!.status).toBe(before)
+  })
+
+  it('asks nothing about parcels already delivered', async () => {
+    await parcelInTransit()
+    await service.pollCarrierStatus({
+      fetcher: answering([{ events: [{ status: 'DELIVERED', category: 'DELIVERED', timestamp: '2026-08-19T15:30:00Z' }] }]).fetcher,
+    })
+
+    const { asked, fetcher } = answering([])
+    expect(await service.pollCarrierStatus({ fetcher })).toMatchObject({ asked: 0 })
+    expect(asked).toEqual([])
+  })
+
+  it('survives DHL being unreachable', async () => {
+    await parcelInTransit()
+    const failing: Fetcher = async () => { throw new Error('network down') }
+
+    const result = await service.pollCarrierStatus({ fetcher: failing })
+    expect(result).toMatchObject({ asked: 1, moved: 0, failed: 1 })
   })
 })
