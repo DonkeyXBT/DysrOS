@@ -199,7 +199,7 @@ interface Api {
   exportMessage(id: string, format: 'eml' | 'html'): Promise<{
     saved: boolean; path?: string; reason?: string
   }>
-  exportAllUnrecognised(): Promise<{ saved: number; folder?: string; reason?: string }>
+  exportAllUnrecognised(only?: string[]): Promise<{ saved: number; folder?: string; reason?: string }>
   aycdStatus(): Promise<AycdStatusView>
   aycdSetKey(key: string): Promise<void>
   aycdClearKey(): Promise<void>

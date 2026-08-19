@@ -540,8 +540,13 @@ app.whenReady().then(() => {
     return { saved: true, path: picked.filePath }
   })
 
-  handle('export-all-unrecognised', async () => {
-    const ids = service.exportableReviewIds()
+  handle('export-all-unrecognised', async (only?: string[]) => {
+    // A stack of identical mail needs one sample, not fifty: the screen can
+    // ask for exactly the ones it is showing.
+    const available = new Set(service.exportableReviewIds())
+    const ids = only?.length
+      ? only.filter((id) => available.has(id))
+      : [...available]
     if (ids.length === 0) {
       return { saved: 0, reason: 'Nothing in the queue has a stored copy to export.' }
     }

@@ -79,7 +79,7 @@ const api = {
   resolveTracking: () => ipcRenderer.invoke('resolve-tracking'),
   exportMessage: (id: string, format: 'eml' | 'html') =>
     ipcRenderer.invoke('export-message', id, format),
-  exportAllUnrecognised: () => ipcRenderer.invoke('export-all-unrecognised'),
+  exportAllUnrecognised: (only?: string[]) => ipcRenderer.invoke('export-all-unrecognised', only),
   aycdStatus: () => ipcRenderer.invoke('aycd-status'),
   aycdSetKey: (key: string) => ipcRenderer.invoke('aycd-set-key', key),
   aycdClearKey: () => ipcRenderer.invoke('aycd-clear-key'),
