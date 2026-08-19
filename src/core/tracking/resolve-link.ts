@@ -12,6 +12,9 @@
 export interface TrackingIdentity {
   carrier: string
   trackingNumber: string
+  /** DHL puts the delivery postcode in the tracking URL next to the barcode.
+   *  Taking it is how a parcel gets a postcode from mail that stated none. */
+  postalCode?: string | null
 }
 
 export interface ResolvedTracking extends TrackingIdentity {
@@ -50,8 +53,12 @@ const URL_PATTERNS: { pattern: RegExp; carrier: string }[] = [
   { pattern: /https?:\/\/(?:www\.)?jouw\.postnl\.nl\/track-and-trace\/([^?\s#"'<>]+)/i, carrier: 'postnl' },
   { pattern: /https?:\/\/(?:www\.)?jouw\.postnl\.nl\/track-en-trace\/([^?\s#"'<>]+)/i, carrier: 'postnl' },
   { pattern: /https?:\/\/(?:www\.)?postnl\.nl\/(?:[^?\s#"'<>]+\/)*?(?:track-and-trace|track-en-trace)\/([^?\s#"'<>]+)/i, carrier: 'postnl' },
-  { pattern: /https?:\/\/my\.dhlecommerce\.nl\/[^?\s#"'<>]*?\/tracktrace\/([^?\s#"'<>]+)/i, carrier: 'dhl' },
-  { pattern: /https?:\/\/my\.dhlparcel\.nl\/[^?\s#"'<>]*?\/tracktrace\/([^?\s#"'<>]+)/i, carrier: 'dhl' },
+  // The barcode is one path segment. What follows it is the delivery postcode,
+  // not part of the barcode — appending it produced tracking codes like
+  // `JVGL0637312004304176/3043LC`, which no carrier and no redirect tool
+  // accepts.
+  { pattern: /https?:\/\/my\.dhlecommerce\.nl\/[^?\s#"'<>]*?\/tracktrace\/([A-Z0-9]{8,35})(?:\/([0-9]{4}\s?[A-Z]{2}))?/i, carrier: 'dhl' },
+  { pattern: /https?:\/\/my\.dhlparcel\.nl\/[^?\s#"'<>]*?\/tracktrace\/([A-Z0-9]{8,35})(?:\/([0-9]{4}\s?[A-Z]{2}))?/i, carrier: 'dhl' },
   { pattern: /https?:\/\/[^?\s#"'<>]*(?:dhlecommerce|dhlparcel)\.nl[^?\s#"'<>]*?track(?:trace|ing)[/=]([A-Z0-9]+)/i, carrier: 'dhl' },
   { pattern: /[?&#](?:tracking[-_]?id|pieceNumber|trackingnumber|tracking_id)=([A-Z0-9]{10,32})/i, carrier: 'dhl' },
 ]
@@ -138,12 +145,14 @@ export function extractTrackingFromUrl(url: string): TrackingIdentity | null {
   // Whole-URL patterns first: these are the exact shapes bol.com redirects to.
   const decoded = safeDecode(url)
   for (const { pattern, carrier } of URL_PATTERNS) {
-    const captured = pattern.exec(decoded)?.[1]
+    const match = pattern.exec(decoded)
+    const captured = match?.[1]
     if (captured) {
       const code = carrier === 'postnl'
         ? (normalisePostnlCode(captured) ?? captured.toUpperCase())
         : captured.toUpperCase()
-      return { carrier, trackingNumber: code }
+      const postcode = match?.[2]?.replace(/\s+/g, '').toUpperCase() ?? null
+      return { carrier, trackingNumber: code, postalCode: postcode }
     }
   }
 

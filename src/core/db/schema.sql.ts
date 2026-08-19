@@ -237,3 +237,39 @@ CREATE TABLE suppressions (
   PRIMARY KEY (kind, key)
 );
 `
+
+/**
+ * The delivery postcode a parcel was resolved with, and a repair.
+ *
+ * DHL states the postcode next to the barcode in its tracking URL, and the
+ * pattern that read that URL took both as the barcode — real databases hold
+ * codes like `JVGL0637312004304176/3043LC`, which no carrier and no redirect
+ * tool accepts. The barcode is cut back to the barcode, the postcode is kept
+ * in its own column, and rows that turn out to duplicate a parcel already
+ * recorded are folded away first so the unique index still holds.
+ */
+export const SCHEMA_V5 = `
+ALTER TABLE shipments ADD COLUMN postal_code TEXT;
+
+DELETE FROM shipments WHERE id IN (
+  SELECT s.id FROM shipments s
+  WHERE s.tracking_number IS NOT NULL
+    AND instr(s.tracking_number, '/') > 0
+    AND EXISTS (
+      SELECT 1 FROM shipments t
+      WHERE t.id != s.id
+        AND t.carrier = s.carrier
+        AND t.tracking_number = substr(s.tracking_number, 1, instr(s.tracking_number, '/') - 1)
+    )
+);
+
+UPDATE shipments
+SET postal_code = CASE
+      WHEN upper(substr(tracking_number, instr(tracking_number, '/') + 1))
+           GLOB '[0-9][0-9][0-9][0-9][A-Z][A-Z]'
+      THEN upper(substr(tracking_number, instr(tracking_number, '/') + 1))
+      ELSE postal_code
+    END,
+    tracking_number = substr(tracking_number, 1, instr(tracking_number, '/') - 1)
+WHERE tracking_number IS NOT NULL AND instr(tracking_number, '/') > 0;
+`

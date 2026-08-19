@@ -4,6 +4,7 @@ import { Pager, usePaged } from '../Pager.js'
 import { SkeletonTable } from '../Skeleton.js'
 import { ContextMenu, useContextMenu } from '../ContextMenu.js'
 import { Confirm } from '../Confirm.js'
+import { Thumb } from '../Thumb.js'
 
 /** The design's column set: selection, thumbnail, then the item's facts. */
 const COLUMNS =
@@ -267,12 +268,7 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
                     {checked ? '✓' : ''}
                   </button>
 
-                  <div
-                    style={{
-                      width: 26, height: 26, borderRadius: 8,
-                      background: 'repeating-linear-gradient(135deg,#1e2534 0 5px,#242c3e 5px 10px)',
-                    }}
-                  />
+                  <Thumb url={item.imageUrl} />
 
                   <div style={{ minWidth: 0 }}>
                     <div

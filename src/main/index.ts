@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } from 'electro
 import { join } from 'node:path'
 import { writeFileSync, watch, existsSync, mkdirSync } from 'node:fs'
 import { autoUpdater } from 'electron-updater'
+import { ImageCache } from './images.js'
 import { AppService } from './service.js'
 import { ErrorLog, defaultLogPath } from '../core/log.js'
 import { buildCrashReport, issueUrl } from '../core/crash-report.js'
@@ -9,6 +10,7 @@ import { buildCrashReport, issueUrl } from '../core/crash-report.js'
 const REPO = 'DonkeyXBT/DysrOS'
 
 let service: AppService
+let images: ImageCache
 let log: ErrorLog
 let mainWindow: BrowserWindow | null = null
 let mailDir = ''
@@ -287,6 +289,16 @@ app.whenReady().then(() => {
   }
 
   service = new AppService(join(app.getPath('userData'), 'resell-ops.db'), encryptor)
+  images = new ImageCache(join(app.getPath('userData'), 'product-images'))
+
+  // Mail read by an older set of parsers is read again, from the raw copy kept
+  // for exactly this, so what the parsers learned since applies to it too.
+  if (service.needsReparse()) {
+    void service.reparseAll().then((result) => {
+      service.markReparsed()
+      if (result.reparsed > 0) mainWindow?.webContents.send('mail-updated', result)
+    }).catch((error: unknown) => log?.record('error', 'reparse', error))
+  }
 
   // Where mail comes from. Defaults to a folder beside the database, created on
   // first run; the app reads it by itself rather than asking anyone to pick
@@ -558,6 +570,8 @@ app.whenReady().then(() => {
   ipcMain.handle('shipments', () => service.listShipments())
   ipcMain.handle('dashboard', () => service.dashboard())
   ipcMain.handle('inventory', () => service.listInventory())
+  ipcMain.handle('product-image', (_event, url: unknown) =>
+    typeof url === 'string' ? images.get(url) : null)
   ipcMain.handle('purchases', () => service.listPurchases())
   ipcMain.handle('cancellations', () => service.listCancellations())
   ipcMain.handle('review', () => service.listReviewQueue())

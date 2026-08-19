@@ -16,6 +16,7 @@ import type { ParsedMessage } from '../mail/parsed-message.js'
 
 export type ShipmentStatus =
   | 'shipped_dhl'
+  | 'out_for_delivery'
   | 'shipped_postnl'
   | 'shipped_unknown_carrier'
   | 'delivered'
@@ -74,12 +75,13 @@ export function classifyShipment(
     }
   }
 
-  // "De bezorger is onderweg" names no carrier in the subject; the body does.
+  // "De bezorger is onderweg" is the parcel's last leg: it is on the van and
+  // arrives today, usually with the delivery window in the body. That is worth
+  // saying plainly rather than filing under "in transit" with everything else.
   if (/bezorger is onderweg/.test(subject) || /bezorger is onderweg/.test(body)) {
-    const carrier = carrierFromText(body) ?? 'dhl'
     return {
-      status: carrier === 'postnl' ? 'shipped_postnl' : 'shipped_dhl',
-      carrier,
+      status: 'out_for_delivery',
+      carrier: carrierFromText(body) ?? 'dhl',
       inTransit: true,
     }
   }

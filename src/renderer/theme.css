@@ -165,18 +165,16 @@ a:hover { color: var(--accent-bright); }
   border: 1px solid #1c2230; border-radius: var(--r-shell);
 }
 
-.topbar {
-  flex: none; display: flex; align-items: center; gap: 16px;
-  padding: 15px 20px; border-bottom: 1px solid #1a2029;
-}
-.topbar h1 { margin: 0; font-size: 17px; font-weight: 700; letter-spacing: -.02em; }
-.topbar-sub { font-size: 11.5px; color: var(--text-faint); }
-
 .search {
   display: flex; align-items: center; gap: 8px; background: #161b26;
   border: 1px solid var(--border-strong); border-radius: var(--r-pill);
-  padding: 7px 13px; width: 250px;
+  padding: 5px 12px; width: 100%; max-width: 360px;
 }
+.search-glass {
+  width: 10px; height: 10px; flex: none; border-radius: 50%;
+  border: 1.5px solid #6f7789;
+}
+.search:focus-within { border-color: #3a4a6a; }
 .search input {
   border: 0; background: transparent; outline: none; color: var(--text);
   font-family: inherit; font-size: 12.5px; width: 100%;
@@ -324,8 +322,8 @@ a:hover { color: var(--accent-bright); }
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 38px;
-  padding: 0 8px 0 16px;
+  height: 42px;
+  padding: 0 12px;
   -webkit-app-region: drag;
   user-select: none;
 }
@@ -335,6 +333,11 @@ a:hover { color: var(--accent-bright); }
   color: var(--text-faint);
   letter-spacing: .01em;
 }
+/* Equal-width sides, so the search between them is centred on the bar itself
+   rather than on whatever is left over after the controls. */
+.titlebar-side { flex: 1 1 0; min-width: 0; display: flex; align-items: center; }
+.titlebar-side-end { justify-content: flex-end; }
+.titlebar-search { flex: none; -webkit-app-region: no-drag; }
 .titlebar-buttons { display: flex; gap: 2px; -webkit-app-region: no-drag; }
 .titlebar-actions {
   display: flex; align-items: center; gap: 6px;
@@ -662,3 +665,26 @@ a:hover { color: var(--accent-bright); }
   display: flex; align-items: center; justify-content: center;
   color: #1a1d26; font-weight: 800; font-size: 11px;
 }
+
+/* Article photographs. The tile keeps the table's rhythm whether or not a
+   picture was found, so rows do not jump as pictures arrive. */
+.thumb {
+  flex: none; border-radius: 8px; overflow: hidden;
+  background: repeating-linear-gradient(135deg, #1e2534 0 5px, #242c3e 5px 10px);
+  border: 1px solid #232b3b;
+}
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+/* Settings uses the whole page rather than a narrow column down the middle:
+   the panels are short and independent, so side by side they fit in one view
+   instead of running off the bottom. Falls back to one column when the window
+   is too narrow to hold two. */
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(430px, 1fr));
+  align-content: start;
+  gap: 13px;
+  overflow-y: auto;
+}
+.settings-grid > section { margin: 0; }
+.settings-wide { grid-column: 1 / -1; }

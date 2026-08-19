@@ -10,6 +10,7 @@ const FIXTURES = {
   cancellation: 'Je_artikel_is_geannuleerd_0.eml',
   shipmentDhl: 'Je pakket is nu bij DHL.eml',
   shipmentPostnl: 'Je pakket is nu bij PostNL.eml',
+  outForDelivery: 'De_bezorger_is_onderweg_0.eml',
 } as const
 
 function fixturePath(name: string): string {
@@ -185,5 +186,52 @@ describe.skipIf(!allPresent)('bol delivery address extraction', () => {
 
     const [postnl] = bolShipmentConfirmation.parse(await load(FIXTURES.shipmentPostnl))
     expect(postnl!.payload.dhlRedirectable).toBe(false)
+  })
+})
+
+describe.skipIf(!allPresent)('product photographs', () => {
+  it('takes the article picture from an order confirmation', async () => {
+    const [event] = bolOrderConfirmation.parse(await load(FIXTURES.orderWithShipping))
+    expect(event!.payload.imageUrl).toBe('https://media.s-bol.com/mo3GjW1ZZyxA/YvAEmy2/250x200.jpg')
+  })
+
+  it('takes it from a cancellation too', async () => {
+    const [event] = bolCancellation.parse(await load(FIXTURES.cancellation))
+    expect(event!.payload.imageUrl).toBe('https://media.s-bol.com/75PLxJB9Z3rj/L8y4jQp/250x200.jpg')
+  })
+
+  it('takes it from a shipping mail, for both carriers', async () => {
+    const [dhl] = bolShipmentConfirmation.parse(await load(FIXTURES.shipmentDhl))
+    expect(dhl!.payload.imageUrl).toBe('https://media.s-bol.com/QwyZPpV5XDJ0/gLjOgGZ/250x200.jpg')
+    const [postnl] = bolShipmentConfirmation.parse(await load(FIXTURES.shipmentPostnl))
+    expect(postnl!.payload.imageUrl).toBe('https://media.s-bol.com/mpOJ18KNN5YE/9ro2rmJ/250x200.jpg')
+  })
+})
+
+describe.skipIf(!allPresent)('the courier is out with it', () => {
+  it('is claimed by the shipping parser, not the pre-dispatch one', async () => {
+    const message = await load(FIXTURES.outForDelivery)
+    expect(bolShipmentConfirmation.matches(message)).toBe(true)
+  })
+
+  it('records the last leg as its own status rather than as transit', async () => {
+    const [event] = bolShipmentConfirmation.parse(await load(FIXTURES.outForDelivery))
+
+    expect(event!.type).toBe('shipped')
+    expect(event!.externalOrderId).toBe('C000D3LPPH')
+    expect(event!.payload).toMatchObject({
+      carrier: 'dhl',
+      shipmentStatus: 'out_for_delivery',
+      outForDelivery: true,
+      title: 'Pokémon TCG - Ascended Heroes Booster Bundle',
+      quantity: 2,
+      imageUrl: 'https://media.s-bol.com/QwyZPpV5XDJ0/gLjOgGZ/250x200.jpg',
+    })
+  })
+
+  it('keeps the window the courier gave, on the day it was sent', async () => {
+    const [event] = bolShipmentConfirmation.parse(await load(FIXTURES.outForDelivery))
+    expect(event!.payload.deliveryWindow).toBe('17:00–19:00')
+    expect(event!.payload.expectedDeliveryAt).toBe('2026-08-19')
   })
 })
