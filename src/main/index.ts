@@ -13,7 +13,7 @@ let log: ErrorLog
 let mainWindow: BrowserWindow | null = null
 let mailDir = ''
 let rescanTimer: NodeJS.Timeout | null = null
-let hourlyTimer: NodeJS.Timeout | null = null
+let syncTimer: NodeJS.Timeout | null = null
 let trackingTimer: NodeJS.Timeout | null = null
 let trackingInFlight = false
 let updateTimer: NodeJS.Timeout | null = null
@@ -21,7 +21,15 @@ let lastOfferedVersion: string | null = null
 /** Guards against a scheduled sync starting on top of one already running. */
 let syncInFlight = false
 
-const HOURLY_SYNC_MS = 60 * 60 * 1000
+/**
+ * How often to look for new mail.
+ *
+ * Every ten to twenty minutes rather than a fixed hour: an order confirmation
+ * an hour stale is not much use, and the interval is varied so several
+ * mailboxes are not all polled on the same beat.
+ */
+const SYNC_MIN_MS = 10 * 60 * 1000
+const SYNC_MAX_MS = 20 * 60 * 1000
 /**
  * Tracking codes are chased on their own schedule as well as after a sync.
  * A backlog of parcels cannot clear itself otherwise: a sync only resolves a
@@ -66,6 +74,21 @@ async function sweepTracking(reason: string): Promise<void> {
   } finally {
     trackingInFlight = false
   }
+}
+
+/** Queues the next sync, then keeps queueing after each one finishes. */
+function scheduleNextSync(): void {
+  if (syncTimer) clearTimeout(syncTimer)
+  const delay = SYNC_MIN_MS + Math.random() * (SYNC_MAX_MS - SYNC_MIN_MS)
+  syncTimer = setTimeout(() => {
+    void runSync('scheduled')
+      .catch(() => {
+        // Already logged; a failed sync must not stop later ones.
+      })
+      // Scheduled from the end of a run rather than the start, so a slow
+      // mailbox cannot have two syncs overlapping.
+      .finally(scheduleNextSync)
+  }, delay)
 }
 
 /**
@@ -395,7 +418,15 @@ app.whenReady().then(() => {
   })
 
   ipcMain.handle('accounts', () => service.listAccounts())
-  ipcMain.handle('add-account', (_e, account) => service.addAccount(account))
+  ipcMain.handle('add-account', (_e, account) => {
+    const added = service.addAccount(account)
+    // A mailbox just connected has everything to fetch; waiting ten minutes to
+    // start would make the app look broken at exactly the wrong moment.
+    setTimeout(() => {
+      void runSync('manual').catch(() => {})
+    }, 500)
+    return added
+  })
   ipcMain.handle('remove-account', (_e, id: string) => service.removeAccount(id))
   ipcMain.handle('test-account', (_e, connection) => service.testAccount(connection))
   ipcMain.handle('sync-accounts', () => runSync('manual'))
@@ -571,11 +602,7 @@ app.whenReady().then(() => {
 
   // Catch up on anything that arrived while the application was closed, then
   // keep checking. A missed email should never need a manual sync to notice.
-  hourlyTimer = setInterval(() => {
-    void runSync('scheduled').catch(() => {
-      // Already logged; a failed scheduled sync must not stop later ones.
-    })
-  }, HOURLY_SYNC_MS)
+  scheduleNextSync()
 
   trackingTimer = setInterval(() => {
     void sweepTracking('scheduled sweep')
@@ -592,7 +619,7 @@ app.whenReady().then(() => {
 })
 
 app.on('before-quit', () => {
-  if (hourlyTimer) clearInterval(hourlyTimer)
+  if (syncTimer) clearTimeout(syncTimer)
   if (trackingTimer) clearInterval(trackingTimer)
   if (updateTimer) clearInterval(updateTimer)
   // The watcher owns a repeating timer; leaving it running holds the process open.
