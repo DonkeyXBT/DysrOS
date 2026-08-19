@@ -5,11 +5,13 @@ import { SkeletonTable } from '../Skeleton.js'
 import { ContextMenu, useContextMenu } from '../ContextMenu.js'
 import { Confirm } from '../Confirm.js'
 import { Thumb } from '../Thumb.js'
+import { groupByProduct, type ProductGroup } from './inventory-groups.js'
+import { SellDialog } from '../Sell.js'
 
 /** The design's column set: selection, thumbnail, then the item's facts. */
 const COLUMNS =
-  '26px 34px minmax(190px,2fr) 96px 60px 118px 92px 84px 84px 84px 62px 84px 96px'
-const MIN_WIDTH = 1250
+  '26px 34px minmax(180px,2fr) 78px 52px 104px 88px 74px 84px 88px 88px 54px 92px 80px'
+const MIN_WIDTH = 1320
 
 const STATUS: Record<string, { label: string; hue: number; muted?: boolean }> = {
   incoming: { label: 'Incoming', hue: 285 },
@@ -28,7 +30,9 @@ function statusColour(status: string): string {
   return entry.muted ? 'oklch(0.60 0.015 265)' : `oklch(0.76 0.13 ${entry.hue})`
 }
 
-type SortKey = 'title' | 'brand' | 'size' | 'status' | 'purchasedAt' | 'cost' | 'daysHeld' | 'retailer'
+type SortKey =
+  | 'title' | 'brand' | 'size' | 'status' | 'purchasedAt' | 'cost' | 'profit'
+  | 'daysHeld' | 'retailer'
 
 const HEADERS: { key: SortKey | null; label: string; right?: boolean }[] = [
   { key: 'title', label: 'Item' },
@@ -38,13 +42,21 @@ const HEADERS: { key: SortKey | null; label: string; right?: boolean }[] = [
   { key: null, label: 'Parcel' },
   { key: 'purchasedAt', label: 'Bought' },
   { key: 'cost', label: 'Cost', right: true },
-  { key: null, label: 'Listed', right: true },
+  { key: null, label: 'Sold for', right: true },
+  { key: 'profit', label: 'Profit', right: true },
   { key: 'daysHeld', label: 'Days', right: true },
-  { key: null, label: 'Location' },
+  { key: null, label: 'Buyer' },
   { key: 'retailer', label: 'Retailer' },
 ]
 
-export function Inventory({ query, dataVersion }: { query: string; dataVersion: number }) {
+export function Inventory({
+  query, dataVersion, onSearch,
+}: {
+  query: string
+  dataVersion: number
+  /** Lets a product open the units behind it, by searching for its title. */
+  onSearch?: (term: string) => void
+}) {
   const [items, setItems] = useState<ItemView[] | null>(null)
   const [statusFilter, setStatusFilter] = useState('all')
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({
@@ -52,6 +64,11 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
   })
   const [selected, setSelected] = useState<string[]>([])
   const [confirming, setConfirming] = useState<ItemView | null>(null)
+  // Units are the truth; by product is how you read it. Which one is showing
+  // is a view, not a filter — the status chips still apply to both.
+  const [view, setView] = useState<'units' | 'products'>('units')
+  /** Units being recorded as sold, one or several to the same buyer. */
+  const [selling, setSelling] = useState<ItemView[] | null>(null)
   const { menu, open, close } = useContextMenu()
 
   const load = () => {
@@ -77,6 +94,9 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
       const pick = (item: ItemView): string | number => {
         switch (sort.key) {
           case 'cost': return item.costMinor
+          // Unsold units sort below sold ones rather than as a zero profit,
+          // which would read as breaking even.
+          case 'profit': return item.profitMinor ?? Number.NEGATIVE_INFINITY
           case 'daysHeld': return item.daysHeld ?? -1
           case 'purchasedAt': return item.purchasedAt ?? ''
           case 'brand': return item.brand ?? ''
@@ -93,6 +113,7 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
   }, [all, statusFilter, term, sort])
 
   const paged = usePaged(filtered, `${statusFilter}|${term}|${sort.key}${sort.dir}`)
+  const products = useMemo(() => groupByProduct(filtered), [filtered])
 
   if (!items) return <SkeletonTable columns={COLUMNS} minWidth={MIN_WIDTH} rows={12} />
 
@@ -125,6 +146,17 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
     <div className="screen">
       <ContextMenu menu={menu} onClose={close} />
 
+      {selling && (
+        <SellDialog
+          units={selling}
+          onClose={() => setSelling(null)}
+          onSold={() => {
+            setSelected([])
+            load()
+          }}
+        />
+      )}
+
       {confirming && (
         <Confirm
           title="Delete unit"
@@ -146,6 +178,10 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 7, flexWrap: 'wrap' }}>
+        <Chip active={view === 'products'} onClick={() => setView(view === 'products' ? 'units' : 'products')}>
+          By product <span className="mono" style={{ opacity: .6 }}>{products.length}</span>
+        </Chip>
+        <span style={{ width: 1, height: 18, background: 'var(--border)' }} />
         <Chip active={statusFilter === 'all'} onClick={() => setStatusFilter('all')}>
           All <span className="mono" style={{ opacity: .6 }}>{all.length}</span>
         </Chip>
@@ -183,6 +219,13 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
           <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
             <button
               className="btn"
+              style={{ borderColor: '#2b3a5e', color: 'var(--accent-bright)' }}
+              onClick={() => setSelling(all.filter((item) => selected.includes(item.id)))}
+            >
+              Sell {selected.length}
+            </button>
+            <button
+              className="btn"
               style={{ color: 'var(--pink)', borderColor: '#43303a' }}
               onClick={async () => {
                 for (const id of selected) await api.deleteRecord('item', id)
@@ -197,6 +240,19 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
         </div>
       )}
 
+      {view === 'products' && (
+        <ByProduct
+          groups={products}
+          onOpen={(title) => {
+            // Opening a product shows the units behind it, which is the row
+            // the count came from.
+            setView('units')
+            onSearch?.(title)
+          }}
+        />
+      )}
+
+      {view === 'units' && (
       <div className="table">
         <div className="table-scroll">
           <div className="thead" style={{ minWidth: MIN_WIDTH, gridTemplateColumns: COLUMNS }}>
@@ -241,6 +297,24 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
                         label: checked ? 'Deselect' : 'Select',
                         onSelect: () => setSelected((current) =>
                           checked ? current.filter((id) => id !== item.id) : [...current, item.id]),
+                      },
+                      {
+                        label: checked && selected.length > 1
+                          ? `Sold ${selected.length} units…`
+                          : 'Sold this unit…',
+                        onSelect: () => setSelling(
+                          checked && selected.length > 1
+                            ? all.filter((row) => selected.includes(row.id))
+                            : [item],
+                        ),
+                      },
+                      {
+                        label: 'Not sold after all',
+                        disabled: item.soldMinor === null,
+                        onSelect: async () => {
+                          await api.unsellItems([item.id])
+                          load()
+                        },
                       },
                       {
                         label: 'Copy order reference',
@@ -329,9 +403,22 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
 
                   <Cell mono>{item.purchasedAt?.slice(5, 10) ?? '—'}</Cell>
                   <Cell mono right>{item.cost}</Cell>
-                  <Cell mono right>—</Cell>
+                  <Cell mono right>{item.sold ?? '—'}</Cell>
+                  <div
+                    className="mono"
+                    style={{
+                      fontSize: 11, textAlign: 'right', whiteSpace: 'nowrap',
+                      overflow: 'hidden', textOverflow: 'ellipsis',
+                      color: item.profitMinor === null
+                        ? 'var(--text-ghost)'
+                        : item.profitMinor >= 0 ? 'var(--teal)' : 'var(--pink)',
+                    }}
+                    title={item.buyer ? `Sold to ${item.buyer}` : undefined}
+                  >
+                    {item.profit ?? '—'}
+                  </div>
                   <Cell mono right>{item.daysHeld ?? '—'}</Cell>
-                  <Cell>{item.location ?? '—'}</Cell>
+                  <Cell>{item.buyer ?? item.location ?? '—'}</Cell>
                   <Cell>{item.retailer ?? '—'}</Cell>
                 </div>
               )
@@ -339,18 +426,96 @@ export function Inventory({ query, dataVersion }: { query: string; dataVersion: 
           </div>
         </div>
       </div>
+      )}
 
-      <Pager
-        page={paged.page}
-        pageCount={paged.pageCount}
-        from={paged.from}
-        to={paged.to}
-        total={paged.total}
-        noun="units"
-        onPage={paged.setPage}
-      />
+      {view === 'units' ? (
+        <Pager
+          page={paged.page}
+          pageCount={paged.pageCount}
+          from={paged.from}
+          to={paged.to}
+          total={paged.total}
+          noun="units"
+          onPage={paged.setPage}
+        />
+      ) : (
+        <div style={{ fontSize: 11.5, color: 'var(--text-dimmer)', paddingLeft: 4 }}>
+          {products.length} product{products.length === 1 ? '' : 's'} ·{' '}
+          {filtered.length} unit{filtered.length === 1 ? '' : 's'} · click one to see its units
+        </div>
+      )}
     </div>
   )
+}
+
+const PRODUCT_COLUMNS = '34px minmax(200px,3fr) 76px 84px 80px 72px 104px 96px 104px 96px'
+
+function ByProduct({
+  groups,
+  onOpen,
+}: {
+  groups: ProductGroup[]
+  onOpen: (title: string) => void
+}) {
+  return (
+    <div className="table">
+      <div className="table-scroll">
+        <div className="thead" style={{ minWidth: 900, gridTemplateColumns: PRODUCT_COLUMNS }}>
+          <div />
+          <div>Product</div>
+          <div style={{ textAlign: 'right' }}>Total</div>
+          <div style={{ textAlign: 'right' }}>Incoming</div>
+          <div style={{ textAlign: 'right' }}>In stock</div>
+          <div style={{ textAlign: 'right' }}>Gone</div>
+          <div style={{ textAlign: 'right' }}>Spent</div>
+          <div style={{ textAlign: 'right' }}>Avg unit</div>
+          <div style={{ textAlign: 'right' }}>Profit</div>
+          <div>Last bought</div>
+        </div>
+        <div className="table-scroll-y">
+          {groups.map((group) => (
+            <div
+              key={group.title}
+              className="trow"
+              style={{ minWidth: 900, gridTemplateColumns: PRODUCT_COLUMNS }}
+              onClick={() => onOpen(group.title)}
+              title="Show these units"
+            >
+              <Thumb url={group.imageUrl} />
+              <Cell>{group.title}</Cell>
+              <div
+                className="mono"
+                style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', textAlign: 'right' }}
+              >
+                {group.units}×
+              </div>
+              <Cell mono right>{group.incoming || '—'}</Cell>
+              <Cell mono right>{group.inStock || '—'}</Cell>
+              <Cell mono right>{group.gone || '—'}</Cell>
+              <Cell mono right>{money(group.costMinor)}</Cell>
+              <Cell mono right>{money(Math.round(group.costMinor / group.units))}</Cell>
+              <div
+                className="mono"
+                style={{
+                  fontSize: 11, textAlign: 'right',
+                  color: group.soldMinor === 0
+                    ? 'var(--text-ghost)'
+                    : group.profitMinor >= 0 ? 'var(--teal)' : 'var(--pink)',
+                }}
+              >
+                {group.soldMinor === 0 ? '—' : money(group.profitMinor)}
+              </div>
+              <Cell mono>{group.lastBoughtAt?.slice(0, 10) ?? '—'}</Cell>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function money(minor: number): string {
+  return `€${(minor / 100).toFixed(2)}`
 }
 
 function Cell({

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { carrierTrackingUrl, normalisePostcode } from './carrier-url.js'
+import { carrierTrackingUrl, dhlInterventionUrl, normalisePostcode } from './carrier-url.js'
 
 describe('normalisePostcode', () => {
   it('drops the space and shouts it, as the carriers want it', () => {
@@ -53,5 +53,21 @@ describe('carrierTrackingUrl', () => {
   it('ignores a postcode that is not one rather than putting it in the URL', () => {
     expect(carrierTrackingUrl('dhl', 'JVGL0627463317265600', 'unknown'))
       .toBe('https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600')
+  })
+})
+
+describe('dhlInterventionUrl', () => {
+  it('is the tracking page plus the interventions step', () => {
+    expect(dhlInterventionUrl('JVGL0627463317265600', '3071 NE'))
+      .toBe('https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600/3071NE/interventions')
+  })
+
+  it('is null without a postcode, because DHL shows no options without one', () => {
+    expect(dhlInterventionUrl('JVGL0627463317265600', null)).toBeNull()
+    expect(dhlInterventionUrl('JVGL0627463317265600', 'nonsense')).toBeNull()
+  })
+
+  it('is null without a barcode', () => {
+    expect(dhlInterventionUrl(null, '3071NE')).toBeNull()
   })
 })

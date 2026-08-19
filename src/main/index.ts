@@ -2,7 +2,9 @@ import { app, BrowserWindow, ipcMain, dialog, shell, safeStorage } from 'electro
 import { join } from 'node:path'
 import { writeFileSync, watch, existsSync, mkdirSync } from 'node:fs'
 import { autoUpdater } from 'electron-updater'
+import { ActivityHub } from '../core/activity.js'
 import { ImageCache } from './images.js'
+import { RedirectWindow } from './redirect-window.js'
 import { AppService } from './service.js'
 import { ErrorLog, defaultLogPath } from '../core/log.js'
 import { buildCrashReport, issueUrl } from '../core/crash-report.js'
@@ -11,6 +13,10 @@ const REPO = 'DonkeyXBT/DysrOS'
 
 let service: AppService
 let images: ImageCache
+/** Everything running in the background, for the activity list in the sidebar. */
+const activity = new ActivityHub()
+/** True while parcels are being redirected, so a second run cannot start. */
+let redirecting = false
 let log: ErrorLog
 let mainWindow: BrowserWindow | null = null
 let mailDir = ''
@@ -55,10 +61,12 @@ const LIVE_REFRESH_EVERY = 20
 async function sweepTracking(reason: string): Promise<void> {
   if (trackingInFlight) return
   trackingInFlight = true
+  activity.start('tracking', 'Getting tracking codes', 'looking for parcels without a barcode')
   try {
     const result = await service.resolveTrackingCodes({
       limit: 60,
       onProgress: (done, total) => {
+        activity.step('tracking', `following link ${done} of ${total}`, done, total)
         mainWindow?.webContents.send('sync-progress', {
           account: 'tracking',
           done,
@@ -71,8 +79,12 @@ async function sweepTracking(reason: string): Promise<void> {
       log.record('info', 'tracking', `${reason}: resolved ${result.resolved} of ${result.attempted}`)
       mainWindow?.webContents.send('mail-updated', { tracking: result })
     }
+    activity.finish('tracking', result.attempted === 0
+      ? 'every parcel already has its code'
+      : `found ${result.resolved} of ${result.attempted}`)
   } catch (error) {
     log.record('warn', 'tracking', error)
+    activity.finish('tracking', 'could not reach the carrier', false)
   } finally {
     trackingInFlight = false
   }
@@ -113,9 +125,16 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
   }
   syncInFlight = true
   log.record('info', 'sync', `${reason} sync started`)
+  activity.start('sync', 'Syncing mail', `${reason} sync starting`)
 
   try {
     const result = await service.syncAccounts(undefined, (progress) => {
+      activity.step(
+        'sync',
+        `${progress.account}: ${progress.done} read, ${progress.stored} new`,
+        progress.done,
+        null,
+      )
       mainWindow?.webContents.send('sync-progress', progress)
       if (progress.done % LIVE_REFRESH_EVERY === 0) {
         mainWindow?.webContents.send('mail-updated', { partial: true })
@@ -125,6 +144,7 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
       log.record('warn', 'sync', new Error(failure.error), `account: ${failure.email}`)
     }
     log.record('info', 'sync', `${reason} sync finished: ${result.fetched} fetched, ${result.stored} new`)
+    activity.finish('sync', `${result.fetched} read, ${result.stored} new`)
     mainWindow?.webContents.send('mail-updated', result)
 
     // Barcodes are only reachable by following the retailer's redirect, so the
@@ -134,6 +154,7 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
     return result
   } catch (error) {
     const entry = log.record('error', 'sync', error)
+    activity.finish('sync', entry.message, false)
     mainWindow?.webContents.send('crash', entry)
     throw error
   } finally {
@@ -218,6 +239,14 @@ function createWindow(): void {
   mainWindow.on('maximize', applyScale)
   mainWindow.on('unmaximize', applyScale)
 
+  // Background work reports itself to the sidebar as it happens, so the
+  // question "what is it doing?" never needs a restart to answer.
+  activity.subscribe((entries) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('activity', entries)
+    }
+  })
+
   // The title bar's maximise button has two icons, so the renderer needs to
   // know which state the window is actually in — including when the user
   // double-clicks the bar or drags the window to an edge.
@@ -294,10 +323,15 @@ app.whenReady().then(() => {
   // Mail read by an older set of parsers is read again, from the raw copy kept
   // for exactly this, so what the parsers learned since applies to it too.
   if (service.needsReparse()) {
+    activity.start('reparse', 'Re-reading stored mail', 'applying what the parsers learned')
     void service.reparseAll().then((result) => {
       service.markReparsed()
+      activity.finish('reparse', `${result.reparsed} of ${result.examined} re-read`)
       if (result.reparsed > 0) mainWindow?.webContents.send('mail-updated', result)
-    }).catch((error: unknown) => log?.record('error', 'reparse', error))
+    }).catch((error: unknown) => {
+      log?.record('error', 'reparse', error)
+      activity.finish('reparse', 'could not re-read stored mail', false)
+    })
   }
 
   // Where mail comes from. Defaults to a folder beside the database, created on
@@ -444,7 +478,13 @@ app.whenReady().then(() => {
   ipcMain.handle('sync-accounts', () => runSync('manual'))
 
   handle('resolve-tracking', async () => {
-    const result = await service.resolveTrackingCodes({ limit: 200 })
+    activity.start('tracking', 'Getting tracking codes', 'asked for by hand')
+    const result = await service.resolveTrackingCodes({
+      limit: 200,
+      onProgress: (done, total) =>
+        activity.step('tracking', `following link ${done} of ${total}`, done, total),
+    })
+    activity.finish('tracking', `found ${result.resolved} of ${result.attempted}`)
     log.record('info', 'tracking', `manual resolve: ${result.resolved} of ${result.attempted}`)
     mainWindow?.webContents.send('mail-updated', { tracking: result })
     return result
@@ -530,9 +570,16 @@ app.whenReady().then(() => {
   })
   handle('discord-test', () => service.sendDiscordTest())
   handle('reparse-all', async () => {
-    const result = await service.reparseAll()
-    mainWindow?.webContents.send('mail-updated', result)
-    return result
+    activity.start('reparse', 'Re-reading stored mail', 'running the parsers again')
+    try {
+      const result = await service.reparseAll()
+      activity.finish('reparse', `${result.reparsed} of ${result.examined} re-read`)
+      mainWindow?.webContents.send('mail-updated', result)
+      return result
+    } catch (error) {
+      activity.finish('reparse', 'could not re-read stored mail', false)
+      throw error
+    }
   })
 
   ipcMain.handle('aycd-status', () => service.aycdStatus())
@@ -572,6 +619,72 @@ app.whenReady().then(() => {
   ipcMain.handle('inventory', () => service.listInventory())
   ipcMain.handle('product-image', (_event, url: unknown) =>
     typeof url === 'string' ? images.get(url) : null)
+
+  ipcMain.handle('activity', () => activity.list())
+  handle('sell-items', (ids: string[], input: {
+    amountMinor: number; includesVat: boolean; perUnit?: boolean
+    buyer?: string | null; note?: string | null; soldAt?: string
+  }) => {
+    const result = service.sellItems(ids, input)
+    log.record('info', 'sale',
+      `${result.sold} unit(s) sold for ${(result.grossMinor / 100).toFixed(2)}`)
+    mainWindow?.webContents.send('mail-updated', { sold: result.sold })
+    return result
+  })
+  handle('unsell-items', (ids: string[]) => {
+    const count = service.unsellItems(ids)
+    mainWindow?.webContents.send('mail-updated', { unsold: count })
+    return count
+  })
+  ipcMain.handle('vat-position', () => service.vatPosition())
+  ipcMain.handle('redirect-email', () => service.redirectEmail())
+  ipcMain.handle('redirect-set-email', (_event, email: string) => service.setRedirectEmail(email))
+
+  // Redirecting changes where a real parcel actually goes, so it runs only
+  // when asked, for exactly the parcels named, and never twice at once.
+  ipcMain.handle('redirect-parcels', async (_event, ids: string[], dryRun: boolean) => {
+    if (redirecting) return []
+    redirecting = true
+    // Shown rather than hidden: the user can watch what is being done on their
+    // behalf, and step in if DHL asks something this does not know to answer.
+    const page = new RedirectWindow({ show: true })
+    activity.start('redirect', dryRun ? 'Testing a redirect' : 'Redirecting parcels',
+      `${ids.length} parcel${ids.length === 1 ? '' : 's'}`)
+    try {
+      const reports = await service.redirectShipments(ids, {
+        page,
+        dryRun,
+        onProgress: (done, total, current) => {
+          activity.step(
+            'redirect',
+            `${current.trackingNumber ?? 'parcel'}: ${current.step}`,
+            done,
+            total,
+          )
+          mainWindow?.webContents.send('redirect-progress', { done, total, ...current })
+        },
+      })
+      const accepted = reports.filter((report) => report.ok).length
+      activity.finish('redirect', `${accepted} of ${reports.length} accepted`, accepted > 0)
+      for (const report of reports) {
+        log?.record(
+          report.ok ? 'info' : 'warn',
+          'redirect',
+          `${report.trackingNumber ?? 'unknown parcel'}: ${report.message}`,
+        )
+      }
+      return reports
+    } catch (error) {
+      log?.record('error', 'redirect', error)
+      activity.finish('redirect', 'could not reach DHL', false)
+      throw error
+    } finally {
+      page.close()
+      redirecting = false
+      mainWindow?.webContents.send('mail-updated', { reason: 'redirect' })
+    }
+  })
+
   ipcMain.handle('purchases', () => service.listPurchases())
   ipcMain.handle('cancellations', () => service.listCancellations())
   ipcMain.handle('review', () => service.listReviewQueue())

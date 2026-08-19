@@ -5,8 +5,9 @@ import { SkeletonTable } from '../Skeleton.js'
 import { ContextMenu, useContextMenu } from '../ContextMenu.js'
 import { Confirm } from '../Confirm.js'
 import { Thumb } from '../Thumb.js'
+import { RedirectDialog } from '../Redirect.js'
 
-const GRID = 'grid-template-columns:70px 110px 170px minmax(160px,1fr) 130px 100px 96px'
+const GRID = 'grid-template-columns:26px 70px 110px 170px minmax(160px,1fr) 130px 100px 96px'
 
 const CARRIER_MARK: Record<string, { abbr: string; color: string }> = {
   dhl: { abbr: 'DH', color: 'oklch(0.80 0.14 90)' },
@@ -42,6 +43,10 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   const [resolveNote, setResolveNote] = useState<string | null>(null)
 
   const [confirming, setConfirming] = useState<ShipmentView | null>(null)
+  // Parcels ticked for a redirect. Kept by id, so a refresh mid-run does not
+  // lose the selection.
+  const [picked, setPicked] = useState<string[]>([])
+  const [redirecting, setRedirecting] = useState<ShipmentView[] | null>(null)
   const { menu, open, close } = useContextMenu()
 
   const load = () => {
@@ -68,6 +73,7 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
 
   const redirectable = shipments.filter((s) => s.dhlRedirectable)
   const awaiting = shipments.filter((s) => s.trackingNumber === null)
+  const pickedParcels = redirectable.filter((parcel) => picked.includes(parcel.id))
 
   if (shipments.length === 0) {
     return (
@@ -83,6 +89,17 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   return (
     <div className="screen" style={{ flexDirection: 'row', gap: 13, alignItems: 'stretch' }}>
       <ContextMenu menu={menu} onClose={close} />
+
+      {redirecting && (
+        <RedirectDialog
+          parcels={redirecting}
+          onClose={() => setRedirecting(null)}
+          onDone={() => {
+            setPicked([])
+            load()
+          }}
+        />
+      )}
 
       {confirming && (
         <Confirm
@@ -147,7 +164,11 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
           <div style={{ fontSize: 11.5, color: 'var(--teal)', paddingLeft: 4 }}>{resolveNote}</div>
         )}
 
-        {redirectable.length > 0 && (
+        {/* Nothing announces that parcels could be redirected: the row's own
+            tick box and its right-click menu say so where the parcel is. This
+            bar exists only once something is picked, because then there is an
+            action waiting to be taken. */}
+        {pickedParcels.length > 0 && (
           <div
             style={{
               display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
@@ -155,21 +176,29 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
             }}
           >
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-bright)' }}>
-              {redirectable.length} DHL parcel{redirectable.length === 1 ? '' : 's'} with a postal code
+              {pickedParcels.length} selected
             </span>
             <span style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>
-              needs a resolved tracking code before the redirect tool can run
+              to the nearest ServicePoint instead of your door
             </span>
-            <button
-              className="btn"
-              style={{ marginLeft: 'auto' }}
-              onClick={async () => {
-                const result = await api.exportRedirectCsv()
-                if (result.written) setExported(`${result.rows} row(s) written to ${result.path}`)
-              }}
-            >
-              Export trackings.csv
-            </button>
+            <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
+              <button
+                className="btn"
+                style={{ borderColor: '#2b3a5e', color: 'var(--accent-bright)' }}
+                onClick={() => setRedirecting(pickedParcels)}
+              >
+                Redirect {pickedParcels.length}
+              </button>
+              {pickedParcels.length < redirectable.length && (
+                <button
+                  className="btn"
+                  onClick={() => setPicked(redirectable.map((parcel) => parcel.id))}
+                >
+                  Select all {redirectable.length}
+                </button>
+              )}
+              <button className="btn" onClick={() => setPicked([])}>Clear</button>
+            </div>
           </div>
         )}
         {exported && (
@@ -179,12 +208,17 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
         <div className="table">
           <div className="table-scroll">
             <div className="thead" style={{ minWidth: 880, ...gridStyle() }}>
+              <div />
               <div>Dir</div><div>Carrier</div><div>Tracking</div><div>Contents</div>
               <div>Status</div><div>Expected</div><div>Postcode</div>
             </div>
             <div className="table-scroll-y">
             {paged.visible.map((shipment) => {
               const mark = CARRIER_MARK[shipment.carrier] ?? { abbr: '??', color: '#8d94a6' }
+              const ticked = picked.includes(shipment.id)
+              // Right-clicking inside a selection acts on the whole selection,
+              // which is what "redirect these" means once several are ticked.
+              const batch = ticked && pickedParcels.length > 1 ? pickedParcels : null
               return (
                 <div
                   key={shipment.id}
@@ -194,10 +228,31 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                   onContextMenu={(event) =>
                     open(event, shipment.title ?? shipment.linked, [
                       {
+                        label: batch
+                          ? `Send ${batch.length} parcels to a ServicePoint…`
+                          : 'Send to a ServicePoint…',
+                        disabled: !shipment.dhlRedirectable && !batch,
+                        onSelect: () => setRedirecting(batch ?? [shipment]),
+                      },
+                      {
+                        label: ticked ? 'Deselect' : 'Select for redirect',
+                        disabled: !shipment.dhlRedirectable,
+                        onSelect: () => setPicked((current) =>
+                          ticked
+                            ? current.filter((id) => id !== shipment.id)
+                            : [...current, shipment.id]),
+                      },
+                      {
                         label: 'Copy tracking code',
                         disabled: !shipment.trackingNumber,
                         onSelect: () =>
                           void navigator.clipboard.writeText(shipment.trackingNumber ?? ''),
+                      },
+                      {
+                        label: 'Copy tracking link',
+                        disabled: !shipment.trackingUrl,
+                        onSelect: () =>
+                          void navigator.clipboard.writeText(shipment.trackingUrl ?? ''),
                       },
                       {
                         label: 'Open tracking link',
@@ -211,6 +266,25 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                       },
                     ])}
                 >
+                  <div onClick={(event) => event.stopPropagation()}>
+                    {shipment.dhlRedirectable && (
+                      <button
+                        aria-label={ticked ? 'Deselect parcel' : 'Select parcel'}
+                        onClick={() => setPicked((current) =>
+                          ticked
+                            ? current.filter((id) => id !== shipment.id)
+                            : [...current, shipment.id])}
+                        style={{
+                          width: 15, height: 15, borderRadius: 4, cursor: 'pointer', padding: 0,
+                          border: `1px solid ${ticked ? 'var(--accent)' : 'var(--border-pill)'}`,
+                          background: ticked ? 'var(--accent)' : 'transparent',
+                          color: '#0b1020', fontSize: 10, lineHeight: 1,
+                        }}
+                      >
+                        {ticked ? '✓' : ''}
+                      </button>
+                    )}
+                  </div>
                   <div>
                     <span
                       className="chip"
@@ -238,9 +312,26 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                       {shipment.carrier.toUpperCase()}
                     </span>
                   </div>
-                  <div className="cell-mono">
-                    {shipment.trackingNumber ?? (
-                      <span style={{ color: 'var(--text-ghost)' }}>not in the email</span>
+                  <div className="cell-mono" style={{ minWidth: 0 }}>
+                    {shipment.trackingUrl ? (
+                      // The barcode is the link: it is what the user wants to
+                      // click, and the carrier page it opens is built from the
+                      // barcode and the postcode.
+                      <button
+                        className="track-link"
+                        title={shipment.trackingUrl}
+                        onClick={(event) => {
+                          event.stopPropagation()
+                          void api.openExternal(shipment.trackingUrl!)
+                        }}
+                      >
+                        {shipment.trackingNumber ?? 'Follow the parcel'}
+                        <span className="track-link-mark">↗</span>
+                      </button>
+                    ) : (
+                      shipment.trackingNumber ?? (
+                        <span style={{ color: 'var(--text-ghost)' }}>not in the email</span>
+                      )
                     )}
                   </div>
                   <div style={{ minWidth: 0, display: 'flex', alignItems: 'center', gap: 9 }}>
@@ -309,8 +400,25 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
           noun="shipments"
           onPage={paged.setPage}
         />
-        <div style={{ fontSize: 11, color: 'var(--text-ghost)', paddingLeft: 4 }}>
-          Click a row for detail
+        <div
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            fontSize: 11, color: 'var(--text-ghost)', paddingLeft: 4,
+          }}
+        >
+          <span>Click a row for detail · right-click a DHL parcel to send it to a ServicePoint</span>
+          {redirectable.length > 0 && (
+            <button
+              className="btn"
+              style={{ padding: '3px 9px', fontSize: 10.5, marginLeft: 'auto' }}
+              onClick={async () => {
+                const result = await api.exportRedirectCsv()
+                if (result.written) setExported(`${result.rows} row(s) written to ${result.path}`)
+              }}
+            >
+              Export trackings.csv
+            </button>
+          )}
         </div>
       </div>
 
@@ -378,7 +486,38 @@ function Detail({ shipment, onClose }: { shipment: ShipmentView; onClose: () => 
         value={[shipment.expectedDeliveryAt, shipment.deliveryWindow].filter(Boolean).join(' · ') || '—'}
         mono
       />
+      <Field label="Tracking code" value={shipment.trackingNumber ?? '—'} mono />
+      <TrackingLink url={shipment.trackingUrl} />
       <Field label="Postcode" value={shipment.postalCode ?? '—'} mono />
+
+      {shipment.redirect && (
+        <div
+          style={{
+            border: `1px solid ${shipment.redirect.outcome === 'redirected' ? '#25443a' : '#4a4030'}`,
+            background: shipment.redirect.outcome === 'redirected'
+              ? 'rgba(93,224,183,.07)'
+              : 'rgba(247,160,138,.08)',
+            borderRadius: 12, padding: '10px 11px',
+            display: 'flex', flexDirection: 'column', gap: 4,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 11.5, fontWeight: 700,
+              color: shipment.redirect.outcome === 'redirected' ? 'var(--teal)' : '#f2c3b4',
+            }}
+          >
+            {shipment.redirect.outcome === 'redirected'
+              ? 'Going to a ServicePoint'
+              : shipment.redirect.outcome === 'test'
+                ? 'Test run only'
+                : 'Redirect not accepted'}
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-dim)', lineHeight: 1.45 }}>
+            {shipment.redirect.message}
+          </div>
+        </div>
+      )}
       <Field label="City" value={shipment.city ?? '—'} />
 
       {shipment.dhlRedirectable && (
@@ -389,11 +528,51 @@ function Detail({ shipment, onClose }: { shipment: ShipmentView; onClose: () => 
             color: 'var(--accent-bright)', lineHeight: 1.45,
           }}
         >
-          Postal code known, so this parcel can go to the DHL ServicePoint redirect tool as soon
-          as its tracking code is resolved.
+          {shipment.trackingNumber
+            ? 'Postal code and tracking code both known, so this parcel can go straight to the DHL ServicePoint redirect tool.'
+            : 'Postal code known, so this parcel can go to the DHL ServicePoint redirect tool as soon as its tracking code is resolved.'}
         </div>
       )}
     </aside>
+  )
+}
+
+/**
+ * The carrier's own page for this parcel.
+ *
+ * Shown in full rather than hidden behind a button: it is built from the
+ * barcode and the postcode, so seeing it is how you know both were read
+ * correctly — and it is the address to paste anywhere else.
+ */
+function TrackingLink({ url }: { url: string | null }) {
+  const [copied, setCopied] = useState(false)
+
+  if (!url) return <Field label="Tracking link" value="—" />
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span className="stat-label">TRACKING LINK</span>
+      <button
+        className="track-link"
+        style={{ textAlign: 'left', wordBreak: 'break-all', whiteSpace: 'normal', lineHeight: 1.4 }}
+        onClick={() => void api.openExternal(url)}
+      >
+        {url}
+      </button>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button className="btn" onClick={() => void api.openExternal(url)}>Open</button>
+        <button
+          className="btn"
+          onClick={() => {
+            void navigator.clipboard.writeText(url)
+            setCopied(true)
+            setTimeout(() => setCopied(false), 1800)
+          }}
+        >
+          {copied ? 'Copied' : 'Copy link'}
+        </button>
+      </div>
+    </div>
   )
 }
 

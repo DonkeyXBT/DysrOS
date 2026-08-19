@@ -97,6 +97,28 @@ const api = {
   },
   exportRedirectCsv: () => ipcRenderer.invoke('export-redirect-csv'),
   openExternal: (url: string) => ipcRenderer.invoke('open-external', url),
+  activity: () => ipcRenderer.invoke('activity'),
+  sellItems: (ids: string[], input: unknown) => ipcRenderer.invoke('sell-items', ids, input),
+  unsellItems: (ids: string[]) => ipcRenderer.invoke('unsell-items', ids),
+  vatPosition: () => ipcRenderer.invoke('vat-position'),
+  onActivity: (handler: (entries: unknown[]) => void) => {
+    const listener = (_e: unknown, entries: unknown[]) => handler(entries)
+    ipcRenderer.on('activity', listener)
+    return () => ipcRenderer.removeListener('activity', listener)
+  },
+  redirectEmail: () => ipcRenderer.invoke('redirect-email'),
+  setRedirectEmail: (email: string) => ipcRenderer.invoke('redirect-set-email', email),
+  redirectParcels: (ids: string[], dryRun: boolean) =>
+    ipcRenderer.invoke('redirect-parcels', ids, dryRun),
+  onRedirectProgress: (handler: (p: {
+    done: number; total: number; id: string; trackingNumber: string | null; step: string
+  }) => void) => {
+    const listener = (_e: unknown, p: {
+      done: number; total: number; id: string; trackingNumber: string | null; step: string
+    }) => handler(p)
+    ipcRenderer.on('redirect-progress', listener)
+    return () => ipcRenderer.removeListener('redirect-progress', listener)
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

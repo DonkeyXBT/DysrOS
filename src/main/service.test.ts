@@ -85,9 +85,26 @@ describe.skipIf(!allPresent)('AppService importing real mail', () => {
     expect(service.listShipments().every((s) => s.trackingNumber === null)).toBe(true)
   })
 
-  it('counts only the DHL parcel as redirect-ready', async () => {
+  it('counts nothing as redirect-ready until a barcode is known', async () => {
     await importAll()
+    // A postcode alone is not enough: DHL addresses a parcel by its barcode,
+    // so calling it ready before then promises something that cannot be done.
+    expect(service.summary().redirectable).toBe(0)
+  })
+
+  it('counts the DHL parcel once its barcode resolves', async () => {
+    await importAll()
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+
     expect(service.summary().redirectable).toBe(1)
+    expect(service.redirectableShipments().map((s) => s.trackingNumber))
+      .toEqual(['JVGL0627463317265600'])
   })
 
   it('produces a redirect CSV header even while tracking codes are unresolved', async () => {
@@ -825,5 +842,264 @@ describe.skipIf(!allPresent)('the postcode the carrier URL reveals', () => {
     })
 
     expect(service.redirectCsv()).toContain('JVGL0627463317265600,3071NE')
+  })
+})
+
+describe.skipIf(!allPresent)('the link to the carrier is on the shipment', () => {
+  it('is built for every parcel whose barcode is known', async () => {
+    await service.importEml(fixturePath('Je pakket is nu bij PostNL.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'postnl',
+        trackingNumber: '3STUNM283054292',
+        finalUrl: 'https://jouw.postnl.nl/track-and-trace/3STUNM283054292',
+      }),
+    })
+
+    const parcel = service.listShipments()[0]!
+    expect(parcel.trackingUrl).toBe('https://jouw.postnl.nl/track-and-trace/3STUNM283054292-NL-3043LC')
+  })
+
+  it('never reports a parcel as awaiting a code once it has one', async () => {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+
+    const followable = service.listShipments().filter((s) => s.trackingNumber !== null)
+    expect(followable.length).toBeGreaterThan(0)
+    expect(followable.every((s) => s.status !== 'pending')).toBe(true)
+  })
+})
+
+describe.skipIf(!allPresent)('re-reading mail keeps what the mail never said', () => {
+  async function resolvedParcel() {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        postalCode: '3043LC',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600/3043LC',
+      }),
+    })
+  }
+
+  it('keeps a barcode that came from following a link, not from the mail', async () => {
+    await resolvedParcel()
+
+    // This is what a version upgrade does, and what the Re-read all mail
+    // button does. It used to throw the barcode away with the row.
+    service.rebuildEntities()
+
+    const parcel = service.listShipments()[0]!
+    expect(parcel.trackingNumber).toBe('JVGL0627463317265600')
+    expect(parcel.postalCode).toBe('3043LC')
+    expect(parcel.status).not.toBe('pending')
+  })
+
+  it('keeps a redirect someone asked for', async () => {
+    await resolvedParcel()
+    await service.redirectShipments(service.redirectableShipments().map((p) => p.id), {
+      page: {
+        goto: async () => {},
+        evaluate: async <T,>(script: string): Promise<T> => {
+          if (script.includes('aria-disabled')) return false as T
+          if (script.includes('innerText') && script.includes('h6')) {
+            return { name: 'Primera Blaak', distance: '350 m', address: null } as T
+          }
+          return true as T
+        },
+      },
+      sleep: async () => {},
+    })
+
+    service.rebuildEntities()
+
+    expect(service.listShipments()[0]!.redirect).toMatchObject({
+      outcome: 'redirected',
+      servicePoint: 'Primera Blaak',
+    })
+  })
+
+  it('survives a full re-parse of the stored mail', async () => {
+    await resolvedParcel()
+    await service.reparseAll()
+
+    expect(service.listShipments()[0]!.trackingNumber).toBe('JVGL0627463317265600')
+  })
+})
+
+describe.skipIf(!allPresent)('sending parcels to a ServicePoint', () => {
+  /** A page that answers every check the driver makes. */
+  function acceptingPage(visited: string[] = []) {
+    return {
+      page: {
+        goto: async (url: string) => { visited.push(url) },
+        evaluate: async <T,>(script: string): Promise<T> => {
+          if (script.includes('aria-disabled')) return false as T
+          if (script.includes('innerText') && script.includes('h6')) {
+            return { name: 'Primera Blaak', distance: '350 m', address: 'Blaak 1, 3011TA Rotterdam' } as T
+          }
+          return true as T
+        },
+      },
+      visited,
+    }
+  }
+
+  async function withResolvedDhlParcel() {
+    await service.importEml(fixturePath('Je pakket is nu bij DHL.eml'))
+    await service.resolveTrackingCodes({
+      resolve: async () => ({
+        carrier: 'dhl',
+        trackingNumber: 'JVGL0627463317265600',
+        finalUrl: 'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600',
+      }),
+    })
+    return service.redirectableShipments()
+  }
+
+  it('drives DHL for exactly the parcels it was given, and records the outcome', async () => {
+    const parcels = await withResolvedDhlParcel()
+    expect(parcels).toHaveLength(1)
+
+    const { page, visited } = acceptingPage()
+    const reports = await service.redirectShipments(parcels.map((p) => p.id), {
+      page,
+      sleep: async () => {},
+    })
+
+    expect(visited).toEqual([
+      'https://my.dhlecommerce.nl/home/tracktrace/JVGL0627463317265600/3043LC/interventions',
+    ])
+    expect(reports).toHaveLength(1)
+    expect(reports[0]).toMatchObject({ ok: true, dryRun: false })
+    expect(reports[0]!.message).toContain('Primera Blaak')
+
+    const shipment = service.listShipments().find((s) => s.trackingNumber === 'JVGL0627463317265600')
+    expect(shipment?.redirect).toMatchObject({
+      outcome: 'redirected',
+      servicePoint: 'Primera Blaak',
+    })
+  })
+
+  it('marks a test run as a test run rather than as a redirect', async () => {
+    const parcels = await withResolvedDhlParcel()
+    const { page } = acceptingPage()
+
+    const reports = await service.redirectShipments(parcels.map((p) => p.id), {
+      page,
+      dryRun: true,
+      sleep: async () => {},
+    })
+
+    expect(reports[0]).toMatchObject({ ok: true, dryRun: true })
+    expect(service.listShipments()[0]!.redirect?.outcome).toBe('test')
+  })
+
+  it('touches nothing for a parcel that was never asked about', async () => {
+    await withResolvedDhlParcel()
+    const { page, visited } = acceptingPage()
+
+    const reports = await service.redirectShipments(['no-such-shipment'], {
+      page,
+      sleep: async () => {},
+    })
+
+    expect(reports).toEqual([])
+    expect(visited).toEqual([])
+  })
+
+  it('sends the confirmation to the connected mailbox unless told otherwise', async () => {
+    expect(service.setRedirectEmail('somewhere@example.com')).toBe('somewhere@example.com')
+    expect(service.redirectEmail()).toBe('somewhere@example.com')
+
+    // Cleared, it falls back rather than leaving DHL with nowhere to write.
+    service.setRedirectEmail('')
+    expect(service.redirectEmail()).toBe(service.listAccounts()[0]?.email ?? null)
+  })
+})
+
+describe.skipIf(!allPresent)('selling by hand, to a buyer who is not a marketplace', () => {
+  async function stock() {
+    await service.importEml(fixturePath('Bedankt_voor_je_bestelling_0.eml'))
+    return service.listInventory()
+  }
+
+  it('records a sale, marks the unit sold and works out the VAT', async () => {
+    const [unit] = await stock()
+
+    const result = service.sellItems([unit!.id], { amountMinor: 7500, includesVat: true, buyer: 'Jan' })
+
+    expect(result).toMatchObject({ sold: 1, grossMinor: 7500, vatMinor: 1302 })
+
+    const after = service.listInventory().find((item) => item.id === unit!.id)!
+    expect(after.status).toBe('sold')
+    expect(after.soldMinor).toBe(7500)
+    expect(after.buyer).toBe('Jan')
+    // Profit is net revenue less net cost, never gross less gross.
+    expect(after.profitMinor).toBe(7500 - 1302 - (unit!.costMinor - after.costVatMinor))
+  })
+
+  it('adds VAT on when the price was agreed without it', async () => {
+    const [unit] = await stock()
+    const result = service.sellItems([unit!.id], { amountMinor: 10000, includesVat: false })
+    expect(result.grossMinor).toBe(12100)
+    expect(result.vatMinor).toBe(2100)
+  })
+
+  it('splits one price across several units sold to the same buyer', async () => {
+    const units = await stock()
+    expect(units.length).toBeGreaterThan(1)
+
+    const ids = units.slice(0, 2).map((unit) => unit.id)
+    const result = service.sellItems(ids, { amountMinor: 15000, includesVat: true, buyer: 'Sanne' })
+
+    expect(result.sold).toBe(2)
+    const sold = service.listInventory().filter((item) => ids.includes(item.id))
+    expect(sold.every((item) => item.status === 'sold')).toBe(true)
+    expect(sold.every((item) => item.buyer === 'Sanne')).toBe(true)
+    // The parts add up to exactly what was received.
+    expect(sold.reduce((sum, item) => sum + (item.soldMinor ?? 0), 0)).toBe(15000)
+  })
+
+  it('replaces a sale rather than recording the same unit twice', async () => {
+    const [unit] = await stock()
+    service.sellItems([unit!.id], { amountMinor: 7500, includesVat: true })
+    service.sellItems([unit!.id], { amountMinor: 8000, includesVat: true })
+
+    expect(service.listInventory().find((item) => item.id === unit!.id)!.soldMinor).toBe(8000)
+  })
+
+  it('puts a unit back when the sale fell through', async () => {
+    const [unit] = await stock()
+    service.sellItems([unit!.id], { amountMinor: 7500, includesVat: true })
+    service.unsellItems([unit!.id])
+
+    const after = service.listInventory().find((item) => item.id === unit!.id)!
+    expect(after.status).toBe('in_stock')
+    expect(after.soldMinor).toBeNull()
+    expect(after.profitMinor).toBeNull()
+  })
+
+  it('states the VAT on everything bought, whether or not anything sold', async () => {
+    const units = await stock()
+    const paid = units.reduce((sum, unit) => sum + unit.costVatMinor, 0)
+
+    const position = service.vatPosition()
+    expect(position.rateBasisPoints).toBe(2100)
+    expect(position.paidOnPurchases).toBe(`€${(paid / 100).toFixed(2)}`)
+    expect(position.balanceMinor).toBe(-paid)
+  })
+
+  it('has nothing to record for units that do not exist', () => {
+    expect(service.sellItems(['nope'], { amountMinor: 5000, includesVat: true }))
+      .toMatchObject({ sold: 0 })
   })
 })

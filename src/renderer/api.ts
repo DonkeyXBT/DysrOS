@@ -6,7 +6,32 @@ export interface ShipmentView {
   lastMovementAt: string | null; expectedDeliveryAt: string | null
   deliveryWindow: string | null
   postalCode: string | null; city: string | null; dhlRedirectable: boolean
+  redirect: {
+    outcome: string; message: string; servicePoint: string | null; attemptedAt: string | null
+  } | null
   linkedToPurchase: boolean
+}
+
+export interface ActivityView {
+  id: string
+  label: string
+  step: string
+  state: 'running' | 'done' | 'failed'
+  done: number | null
+  total: number | null
+  startedAt: string
+  endedAt: string | null
+}
+
+export interface RedirectReportView {
+  id: string
+  trackingNumber: string | null
+  title: string | null
+  ok: boolean
+  dryRun: boolean
+  servicePoint: { name: string | null; distance: string | null; address: string | null } | null
+  reason: string | null
+  message: string
 }
 export interface DashboardView {
   bought: { orders: number; units: number; spend: string; shipped: number; delivered: number }
@@ -28,6 +53,10 @@ export interface DashboardView {
 
 export interface ItemView {
   id: string; title: string; imageUrl: string | null
+  costVatMinor: number; costNetMinor: number
+  soldMinor: number | null; sold: string | null; soldVatMinor: number | null
+  soldAt: string | null; soldVia: string | null; buyer: string | null
+  profitMinor: number | null; profit: string | null
   brand: string | null; sku: string | null
   size: string | null; condition: string; status: string
   cost: string; costMinor: number
@@ -189,6 +218,23 @@ interface Api {
   chooseMailDir(): Promise<string>
   onMailUpdated(handler: () => void): () => void
   exportRedirectCsv(): Promise<{ written: boolean; path: string | null; rows: number }>
+  activity(): Promise<ActivityView[]>
+  sellItems(ids: string[], input: {
+    amountMinor: number; includesVat: boolean; perUnit?: boolean
+    buyer?: string | null; note?: string | null; soldAt?: string
+  }): Promise<{ sold: number; grossMinor: number; profitMinor: number; vatMinor: number }>
+  unsellItems(ids: string[]): Promise<number>
+  vatPosition(): Promise<{
+    rateBasisPoints: number; paidOnPurchases: string; collectedOnSales: string
+    balance: string; balanceMinor: number
+  }>
+  onActivity(handler: (entries: ActivityView[]) => void): () => void
+  redirectEmail(): Promise<string | null>
+  setRedirectEmail(email: string): Promise<string | null>
+  redirectParcels(ids: string[], dryRun: boolean): Promise<RedirectReportView[]>
+  onRedirectProgress(handler: (p: {
+    done: number; total: number; id: string; trackingNumber: string | null; step: string
+  }) => void): () => void
   openExternal(url: string): Promise<void>
 }
 

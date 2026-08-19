@@ -9,6 +9,7 @@ import { EventRepo, type StoredEvent } from '../core/repos/events.js'
 import { loadEml, textOf } from '../core/mail/parsed-message.js'
 import { ParserRegistry } from '../core/parsers/registry.js'
 import { BOL_PARSERS } from '../core/parsers/bol.js'
+import { DHL_PARSERS } from '../core/parsers/dhl.js'
 import { MEDIAMARKT_PARSERS } from '../core/parsers/mediamarkt.js'
 import { PROSHOP_PARSERS } from '../core/parsers/proshop.js'
 import { POCKETGAMES_PARSERS } from '../core/parsers/pocketgames.js'
@@ -23,6 +24,8 @@ import {
   resolveTrackingLink, isNonCarrierBolLanding, type ResolvedTracking,
 } from '../core/tracking/resolve-link.js'
 import { carrierTrackingUrl } from '../core/tracking/carrier-url.js'
+import { redirectParcel, type Page, type ServicePoint } from '../core/tracking/redirect.js'
+import { breakDownSale, vatWithinCost, NL_VAT_BASIS_POINTS } from '../core/sell.js'
 import { findParcel, foldShipment, furthestStatus, mergeInto } from '../core/reconcile/shipment-merge.js'
 import {
   sendToDiscord, sampleNotification, isWebhookUrl, maskWebhookUrl,
@@ -42,6 +45,8 @@ import {
 /** Settings keys for the AYCD Inbox integration. The key setting holds the
  *  ciphertext, never the key itself. */
 const AYCD_KEY_SETTING = 'aycd_api_key_cipher'
+/** Where DHL sends the confirmation when a parcel is redirected. */
+const REDIRECT_EMAIL_SETTING = 'redirect_email'
 const AYCD_ADDRESSES_SETTING = 'aycd_addresses'
 const AYCD_ERROR_SETTING = 'aycd_last_error'
 /** The schema version the derived tables were last built from. */
@@ -89,6 +94,9 @@ export class AppService {
   private readonly events: EventRepo
   private readonly registry = new ParserRegistry([
     ...BOL_PARSERS,
+    // After the retailers: a retailer's own mail is the better source of what
+    // was bought, and DHL's mail is the better source of when it arrives.
+    ...DHL_PARSERS,
     ...MEDIAMARKT_PARSERS,
     ...PROSHOP_PARSERS,
     ...POCKETGAMES_PARSERS,
@@ -276,6 +284,16 @@ export class AppService {
    * column's default forever and the screens would show blanks.
    */
   rebuildEntities(now = new Date().toISOString()): { applied: number; held: number } {
+    // A barcode was not in the mail: it came from following a link, and a
+    // redirect came from someone choosing to send a parcel elsewhere. Neither
+    // can be derived again from the events, so both are carried across the
+    // rebuild rather than thrown away with the rows they sit on.
+    const parcels = this.db.prepare(
+      `SELECT id, carrier, tracking_number, tracking_url, postal_code, status, last_polled_at
+       FROM shipments WHERE tracking_number IS NOT NULL`,
+    ).all() as Record<string, string | null>[]
+    const redirects = this.db.prepare('SELECT * FROM redirects').all() as Record<string, unknown>[]
+
     const rebuild = this.db.transaction(() => {
       this.db.exec('DELETE FROM refunds')
       this.db.exec('DELETE FROM items')
@@ -284,7 +302,61 @@ export class AppService {
       this.db.exec('UPDATE events SET reconciled_at = NULL')
     })
     rebuild()
-    return this.reconciler.run(now)
+    const result = this.reconciler.run(now)
+    this.restoreResolvedParcels(parcels, redirects)
+    return result
+  }
+
+  /** Puts resolved barcodes and redirect records back on the rebuilt rows. */
+  private restoreResolvedParcels(
+    parcels: Record<string, string | null>[],
+    redirects: Record<string, unknown>[],
+  ): void {
+    for (const parcel of parcels) {
+      const id = parcel.id as string
+      const carrier = parcel.carrier ?? 'unknown'
+      const barcode = parcel.tracking_number!
+      // The rebuilt rows may already have folded this parcel into another one.
+      if (findParcel(this.db, carrier, barcode, id)) continue
+
+      this.db.prepare(
+        `UPDATE shipments
+         SET carrier = ?, tracking_number = ?,
+             tracking_url = COALESCE(?, tracking_url),
+             postal_code = COALESCE(?, postal_code),
+             status = ?, last_polled_at = COALESCE(?, last_polled_at)
+         WHERE id = ?`,
+      ).run(
+        carrier,
+        barcode,
+        parcel.tracking_url,
+        parcel.postal_code,
+        furthestStatus(parcel.status ?? null, 'in_transit'),
+        parcel.last_polled_at,
+        id,
+      )
+    }
+
+    for (const redirect of redirects) {
+      const exists = this.db
+        .prepare('SELECT 1 FROM shipments WHERE id = ?')
+        .get(redirect.shipment_id as string)
+      if (!exists) continue
+      this.db.prepare(
+        `INSERT INTO redirects
+           (shipment_id, tracking_number, outcome, message, service_point, dry_run, attempted_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(shipment_id) DO NOTHING`,
+      ).run(
+        redirect.shipment_id,
+        redirect.tracking_number,
+        redirect.outcome,
+        redirect.message,
+        redirect.service_point,
+        redirect.dry_run,
+        redirect.attempted_at,
+      )
+    }
   }
 
   private ensureLocalAccount(): void {
@@ -347,10 +419,13 @@ export class AppService {
               (SELECT COUNT(*) FROM items i WHERE i.purchase_id = s.purchase_id) AS item_count,
               (SELECT i.image_url FROM items i
                 WHERE i.purchase_id = s.purchase_id AND i.image_url IS NOT NULL
-                LIMIT 1) AS item_image
+                LIMIT 1) AS item_image,
+              r.outcome AS redirect_outcome, r.message AS redirect_message,
+              r.service_point AS redirect_point, r.attempted_at AS redirect_at
        FROM shipments s
        LEFT JOIN events e ON e.id = s.id
        LEFT JOIN purchases p ON p.id = s.purchase_id
+       LEFT JOIN redirects r ON r.shipment_id = s.id
        ORDER BY s.created_at DESC`,
     ).all() as Record<string, unknown>[]
 
@@ -382,13 +457,27 @@ export class AppService {
         // on the item it is carrying.
         imageUrl: (payload.imageUrl as string | null) ?? (row.item_image as string | null) ?? null,
         quantity: (payload.quantity as number) ?? (row.item_count as number) ?? 1,
-        status: row.status as string,
+        // "Awaiting code" cannot be true of a parcel whose code is right
+        // there. Rows that kept the earlier status are read as followable
+        // rather than needing a migration to say so.
+        status: trackingNumber && row.status === 'pending' ? 'in_transit' : (row.status as string),
         lastMovementAt: (row.last_movement_at as string | null) ?? null,
         expectedDeliveryAt: (row.expected_delivery_at as string | null) ?? null,
         deliveryWindow: (payload.deliveryWindow as string | null) ?? null,
         postalCode,
         city: (payload.deliveryCity as string | null) ?? null,
-        dhlRedirectable: Boolean(payload.dhlRedirectable),
+        // Redirectable means it can be done now: DHL, barcode and postcode
+        // all present. The mail's own hint only ever said the postcode was
+        // there, which is half the requirement.
+        dhlRedirectable: carrier === 'dhl' && trackingNumber !== null && postalCode !== null,
+        redirect: row.redirect_outcome
+          ? {
+            outcome: row.redirect_outcome as string,
+            message: (row.redirect_message as string | null) ?? '',
+            servicePoint: (row.redirect_point as string | null) ?? null,
+            attemptedAt: (row.redirect_at as string | null) ?? null,
+          }
+          : null,
         /** True once the reconciler has matched this parcel to its order. */
         linkedToPurchase: row.purchase_id !== null,
       }
@@ -485,8 +574,12 @@ export class AppService {
               (SELECT s.carrier FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS carrier,
               (SELECT s.tracking_number FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS tracking_number,
               (SELECT s.status FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS shipment_status,
-              (SELECT s.expected_delivery_at FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS expected
-       FROM items i LEFT JOIN purchases p ON p.id = i.purchase_id
+              (SELECT s.expected_delivery_at FROM shipments s WHERE s.purchase_id = i.purchase_id LIMIT 1) AS expected,
+              sa.gross_minor AS sold_gross, sa.vat_minor AS sold_vat, sa.buyer AS buyer,
+              sa.sold_at AS sold_at, sa.marketplace AS sold_via
+       FROM items i
+       LEFT JOIN purchases p ON p.id = i.purchase_id
+       LEFT JOIN sales sa ON sa.item_id = i.id
        ORDER BY i.purchased_at DESC, i.id`,
     ).all() as Record<string, unknown>[]
 
@@ -496,10 +589,31 @@ export class AppService {
       const daysHeld = purchasedAt
         ? Math.max(0, Math.floor((today - Date.parse(purchasedAt)) / 86_400_000))
         : null
+      // Retailer mail states prices with VAT in them, so the VAT inside a cost
+      // is money that comes back rather than money spent.
+      const costMinor = row.cost_minor as number
+      const costVatMinor = vatWithinCost(costMinor)
+      const soldGross = (row.sold_gross as number | null) ?? null
+      const soldVat = (row.sold_vat as number | null) ?? null
+      // Profit is net against net: VAT collected belongs to the tax office.
+      const profitMinor = soldGross === null
+        ? null
+        : (soldGross - (soldVat ?? 0)) - (costMinor - costVatMinor)
+
       return {
         id: row.id as string,
         title: row.title as string,
         imageUrl: (row.image_url as string | null) ?? null,
+        costVatMinor,
+        costNetMinor: costMinor - costVatMinor,
+        soldMinor: soldGross,
+        sold: soldGross === null ? null : formatMoney(money(soldGross, 'EUR')),
+        soldVatMinor: soldVat,
+        soldAt: (row.sold_at as string | null) ?? null,
+        soldVia: (row.sold_via as string | null) ?? null,
+        buyer: (row.buyer as string | null) ?? null,
+        profitMinor,
+        profit: profitMinor === null ? null : formatMoney(money(profitMinor, 'EUR')),
         brand: (row.brand as string | null) ?? null,
         sku: (row.sku as string | null) ?? null,
         size: (row.size as string | null) ?? null,
@@ -844,6 +958,8 @@ export class AppService {
         if (existing) {
           foldShipment(this.db, row.id, existing)
           mergeInto(this.db, existing, {
+            // The parcel is followable now, whichever of the two rows was kept.
+            status: 'in_transit',
             trackingUrl: direct ?? found.finalUrl ?? null,
             postalCode,
             lastPolledAt: new Date().toISOString(),
@@ -1388,6 +1504,243 @@ export class AppService {
     }
   }
 
+  /**
+   * The address DHL sends the confirmation to.
+   *
+   * Defaults to the first connected mailbox, which is where the parcel's own
+   * mail already arrives, so the confirmation lands beside it.
+   */
+  redirectEmail(): string | null {
+    const configured = this.getSetting(REDIRECT_EMAIL_SETTING)
+    if (configured) return configured
+    return this.listAccounts()[0]?.email ?? null
+  }
+
+  setRedirectEmail(email: string): string | null {
+    const trimmed = email.trim()
+    if (trimmed.length === 0) {
+      this.db.prepare('DELETE FROM settings WHERE key = ?').run(REDIRECT_EMAIL_SETTING)
+      return this.redirectEmail()
+    }
+    this.setSetting(REDIRECT_EMAIL_SETTING, trimmed)
+    return trimmed
+  }
+
+  /** Parcels this can be done to: DHL, barcode known, postcode known. */
+  redirectableShipments(): ShipmentView[] {
+    return this.listShipments().filter(
+      (shipment) =>
+        shipment.carrier === 'dhl'
+        && shipment.trackingNumber !== null
+        && shipment.postalCode !== null
+        && shipment.status !== 'delivered',
+    )
+  }
+
+  /**
+   * Sends chosen parcels to a ServicePoint.
+   *
+   * One at a time, with a pause between: this is a person's page being driven,
+   * and hammering it would be both rude and unreliable. Every parcel is
+   * recorded with what happened to it, including the ones DHL refused, so the
+   * screen can say which are actually going somewhere else.
+   *
+   * Nothing here decides on its own that a parcel should be redirected. The
+   * caller passes exactly the parcels a person picked.
+   */
+  async redirectShipments(
+    ids: string[],
+    options: {
+      page: Page
+      dryRun?: boolean
+      onProgress?: (done: number, total: number, current: RedirectProgress) => void
+      sleep?: (ms: number) => Promise<void>
+    },
+  ): Promise<RedirectReport[]> {
+    const wait = options.sleep ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)))
+    const email = this.redirectEmail()
+    const byId = new Map(this.listShipments().map((shipment) => [shipment.id, shipment]))
+    const reports: RedirectReport[] = []
+
+    for (const [index, id] of ids.entries()) {
+      const shipment = byId.get(id)
+      if (!shipment) continue
+
+      options.onProgress?.(index, ids.length, {
+        id, trackingNumber: shipment.trackingNumber, step: 'starting',
+      })
+
+      const outcome = await redirectParcel(
+        options.page,
+        { trackingNumber: shipment.trackingNumber, postalCode: shipment.postalCode },
+        {
+          email,
+          dryRun: options.dryRun,
+          sleep: options.sleep,
+          onStep: (step) => options.onProgress?.(index, ids.length, {
+            id, trackingNumber: shipment.trackingNumber, step,
+          }),
+        },
+      )
+
+      const report: RedirectReport = {
+        id,
+        trackingNumber: shipment.trackingNumber,
+        title: shipment.title,
+        ok: outcome.ok,
+        dryRun: outcome.ok ? outcome.dryRun : Boolean(options.dryRun),
+        servicePoint: outcome.ok ? outcome.servicePoint : null,
+        reason: outcome.ok ? null : outcome.reason,
+        message: outcome.ok
+          ? describePoint(outcome.servicePoint, outcome.dryRun)
+          : outcome.message,
+      }
+      reports.push(report)
+      this.recordRedirect(report)
+
+      options.onProgress?.(index + 1, ids.length, {
+        id, trackingNumber: shipment.trackingNumber, step: report.ok ? 'done' : 'refused',
+      })
+
+      // The standalone tool waits between parcels for the same reason.
+      if (index < ids.length - 1) await wait(2_500)
+    }
+
+    return reports
+  }
+
+  private recordRedirect(report: RedirectReport): void {
+    this.db.prepare(
+      `INSERT INTO redirects
+         (shipment_id, tracking_number, outcome, message, service_point, dry_run, attempted_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(shipment_id) DO UPDATE SET
+         tracking_number = excluded.tracking_number,
+         outcome = excluded.outcome,
+         message = excluded.message,
+         service_point = excluded.service_point,
+         dry_run = excluded.dry_run,
+         attempted_at = excluded.attempted_at`,
+    ).run(
+      report.id,
+      report.trackingNumber ?? '',
+      report.ok ? (report.dryRun ? 'test' : 'redirected') : (report.reason ?? 'failed'),
+      report.message,
+      report.servicePoint?.name ?? null,
+      report.dryRun ? 1 : 0,
+      new Date().toISOString(),
+    )
+  }
+
+  /**
+   * Records a sale made by hand, to a buyer who is not a marketplace.
+   *
+   * One call covers however many units went in the same deal: a private sale
+   * is usually "these three, one price, one buyer", and making the user record
+   * it three times would invite three different prices.
+   *
+   * The units are marked sold, their sale rows replace any earlier one for the
+   * same unit, and the VAT split is worked out here rather than being typed —
+   * because it follows from the price and whether it already had VAT in it.
+   */
+  sellItems(
+    itemIds: string[],
+    input: {
+      amountMinor: number
+      includesVat: boolean
+      perUnit?: boolean
+      buyer?: string | null
+      note?: string | null
+      soldAt?: string
+    },
+  ): { sold: number; grossMinor: number; profitMinor: number; vatMinor: number } {
+    const rows = this.db.prepare(
+      `SELECT id, cost_minor, cost_currency FROM items WHERE id IN (${itemIds.map(() => '?').join(',')})`,
+    ).all(...itemIds) as { id: string; cost_minor: number; cost_currency: string }[]
+
+    if (rows.length === 0) return { sold: 0, grossMinor: 0, profitMinor: 0, vatMinor: 0 }
+
+    const breakdown = breakDownSale({
+      lines: rows.map((row) => ({ itemId: row.id, costMinor: row.cost_minor })),
+      amountMinor: input.amountMinor,
+      includesVat: input.includesVat,
+      perUnit: input.perUnit,
+    })
+
+    const soldAt = input.soldAt ?? new Date().toISOString()
+    const now = new Date().toISOString()
+    const buyer = input.buyer?.trim() || null
+
+    const write = this.db.transaction(() => {
+      for (const line of breakdown.lines) {
+        this.db.prepare('DELETE FROM sales WHERE item_id = ?').run(line.itemId)
+        this.db.prepare(
+          `INSERT INTO sales
+             (id, item_id, marketplace, external_order_id, buyer, note, price_included_vat,
+              sold_at, currency, gross_minor, vat_minor, vat_rate_bp, payout_minor, created_at)
+           VALUES (?, ?, 'offline', NULL, ?, ?, ?, ?, 'EUR', ?, ?, ?, ?, ?)`,
+        ).run(
+          saleKey(line.itemId, soldAt),
+          line.itemId,
+          buyer,
+          input.note?.trim() || null,
+          input.includesVat ? 1 : 0,
+          soldAt,
+          line.grossMinor,
+          line.vatMinor,
+          breakdown.rateBasisPoints,
+          line.grossMinor,
+          now,
+        )
+        this.db.prepare("UPDATE items SET status = 'sold' WHERE id = ?").run(line.itemId)
+      }
+    })
+    write()
+
+    return {
+      sold: breakdown.lines.length,
+      grossMinor: breakdown.grossMinor,
+      profitMinor: breakdown.profitMinor,
+      vatMinor: breakdown.vatMinor,
+    }
+  }
+
+  /** Undoes a sale recorded by hand, putting the unit back in stock. */
+  unsellItems(itemIds: string[]): number {
+    if (itemIds.length === 0) return 0
+    const placeholders = itemIds.map(() => '?').join(',')
+    const undo = this.db.transaction(() => {
+      this.db.prepare(
+        `DELETE FROM sales WHERE marketplace = 'offline' AND item_id IN (${placeholders})`,
+      ).run(...itemIds)
+      this.db.prepare(
+        `UPDATE items SET status = 'in_stock' WHERE id IN (${placeholders}) AND status = 'sold'`,
+      ).run(...itemIds)
+    })
+    undo()
+    return itemIds.length
+  }
+
+  /** The VAT position across everything: paid on stock, collected on sales. */
+  vatPosition(): {
+    rateBasisPoints: number
+    paidOnPurchases: string
+    collectedOnSales: string
+    balance: string
+    balanceMinor: number
+  } {
+    const items = this.listInventory()
+    const paid = items.reduce((sum, item) => sum + item.costVatMinor, 0)
+    const collected = items.reduce((sum, item) => sum + (item.soldVatMinor ?? 0), 0)
+    return {
+      rateBasisPoints: NL_VAT_BASIS_POINTS,
+      paidOnPurchases: formatMoney(money(paid, 'EUR')),
+      collectedOnSales: formatMoney(money(collected, 'EUR')),
+      balance: formatMoney(money(collected - paid, 'EUR')),
+      balanceMinor: collected - paid,
+    }
+  }
+
   /** Rows for the DHL ServicePoint redirect tool's `trackings.csv`. */
   redirectCsv(): string {
     const rows = this.listShipments().filter(
@@ -1440,6 +1793,13 @@ export interface ShipmentView {
   postalCode: string | null
   city: string | null
   dhlRedirectable: boolean
+  /** The last attempt to send this parcel to a ServicePoint, if there was one. */
+  redirect: {
+    outcome: string
+    message: string
+    servicePoint: string | null
+    attemptedAt: string | null
+  } | null
   linkedToPurchase: boolean
 }
 
@@ -1503,6 +1863,19 @@ export interface ItemView {
   title: string
   /** The article photograph from the retailer's mail, if one was carried. */
   imageUrl: string | null
+  /** VAT inside the purchase price, which the mail always states gross. */
+  costVatMinor: number
+  costNetMinor: number
+  /** What it sold for, gross, once it has been sold. */
+  soldMinor: number | null
+  sold: string | null
+  soldVatMinor: number | null
+  soldAt: string | null
+  soldVia: string | null
+  buyer: string | null
+  /** Net revenue less net cost. Null until it is sold. */
+  profitMinor: number | null
+  profit: string | null
   /** The parcel carrying this unit, once one is known. */
   carrier?: string | null
   trackingNumber?: string | null
@@ -1572,4 +1945,38 @@ export interface SummaryView {
   reviewCount: number
   awaitingTracking: number
   redirectable: number
+}
+
+export interface RedirectProgress {
+  id: string
+  trackingNumber: string | null
+  step: string
+}
+
+export interface RedirectReport {
+  id: string
+  trackingNumber: string | null
+  title: string | null
+  ok: boolean
+  /** True when the run deliberately stopped before the last click. */
+  dryRun: boolean
+  servicePoint: ServicePoint | null
+  reason: string | null
+  message: string
+}
+
+/** How a successful redirect reads once it is done. */
+function describePoint(point: ServicePoint | null, dryRun: boolean): string {
+  const where = point?.name
+    ? `${point.name}${point.distance ? ` (${point.distance})` : ''}`
+    : 'the nearest ServicePoint'
+  return dryRun
+    ? `Test run only: everything up to the last step worked, and it would have gone to ${where}.`
+    : `Going to ${where}.`
+}
+
+/** A sale's identity: the unit it covers and when it was sold, so recording
+ *  the same deal twice replaces it rather than duplicating it. */
+function saleKey(itemId: string, soldAt: string): string {
+  return createHash('sha256').update(`${itemId}|${soldAt}`).digest('hex').slice(0, 32)
 }

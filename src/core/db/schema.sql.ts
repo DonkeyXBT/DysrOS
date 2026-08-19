@@ -273,3 +273,69 @@ SET postal_code = CASE
     tracking_number = substr(tracking_number, 1, instr(tracking_number, '/') - 1)
 WHERE tracking_number IS NOT NULL AND instr(tracking_number, '/') > 0;
 `
+
+/**
+ * Parcels sent to a ServicePoint, and what came of it.
+ *
+ * Redirecting is a real-world act with a real-world result, so it is recorded
+ * rather than inferred: which parcel, when, whether DHL accepted it and which
+ * point it went to. A parcel can be attempted more than once — the option
+ * often opens up only close to delivery — so this keeps the latest attempt per
+ * parcel, which is the one that describes where the parcel is going.
+ */
+export const SCHEMA_V6 = `
+CREATE TABLE redirects (
+  shipment_id     TEXT PRIMARY KEY REFERENCES shipments(id) ON DELETE CASCADE,
+  tracking_number TEXT NOT NULL,
+  outcome         TEXT NOT NULL,
+  message         TEXT,
+  service_point   TEXT,
+  dry_run         INTEGER NOT NULL DEFAULT 0,
+  attempted_at    TEXT NOT NULL
+);
+`
+
+/**
+ * Sales made by hand, to a buyer who is not a marketplace.
+ *
+ * The sales table was built around marketplace orders, which carry an external
+ * id and a payout. A private sale has neither: it has a buyer's name, a price,
+ * and whether that price already had VAT in it. Those are added here, and the
+ * unique key is relaxed so many private sales can exist without external ids
+ * colliding.
+ */
+export const SCHEMA_V7 = `
+CREATE TABLE sales_new (
+  id                TEXT PRIMARY KEY,
+  item_id           TEXT REFERENCES items(id) ON DELETE SET NULL,
+  marketplace       TEXT NOT NULL,
+  external_order_id TEXT,
+  buyer             TEXT,
+  note              TEXT,
+  price_included_vat INTEGER NOT NULL DEFAULT 1,
+  sold_at           TEXT NOT NULL,
+  currency          TEXT NOT NULL,
+  gross_minor       INTEGER NOT NULL DEFAULT 0,
+  fees_minor        INTEGER NOT NULL DEFAULT 0,
+  shipping_minor    INTEGER NOT NULL DEFAULT 0,
+  vat_minor         INTEGER NOT NULL DEFAULT 0,
+  vat_rate_bp       INTEGER NOT NULL DEFAULT 0,
+  payout_minor      INTEGER NOT NULL DEFAULT 0,
+  fx_rate_to_base   REAL NOT NULL DEFAULT 1.0,
+  created_at        TEXT NOT NULL
+);
+
+INSERT INTO sales_new
+  (id, item_id, marketplace, external_order_id, sold_at, currency, gross_minor,
+   fees_minor, shipping_minor, vat_minor, vat_rate_bp, payout_minor, fx_rate_to_base, created_at)
+SELECT id, item_id, marketplace, external_order_id, sold_at, currency, gross_minor,
+       fees_minor, shipping_minor, vat_minor, vat_rate_bp, payout_minor, fx_rate_to_base, created_at
+FROM sales;
+
+DROP TABLE sales;
+ALTER TABLE sales_new RENAME TO sales;
+
+CREATE UNIQUE INDEX idx_sales_external
+  ON sales(marketplace, external_order_id) WHERE external_order_id IS NOT NULL;
+CREATE INDEX idx_sales_item ON sales(item_id);
+`

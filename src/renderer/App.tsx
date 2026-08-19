@@ -10,6 +10,7 @@ import { Reports } from './screens/Reports.js'
 import { Placeholder } from './screens/Placeholder.js'
 import { Logs } from './screens/Logs.js'
 import { TitleBar } from './TitleBar.js'
+import { ActivityButton } from './Activity.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import type { AppNotification } from './Notifications.js'
 import { Toasts } from './Toasts.js'
@@ -48,6 +49,15 @@ function initials(email: string | null): string {
 
 export function App() {
   const [screen, setScreen] = useState<Screen>('Dashboard')
+  // Whether the menu is folded down to its icons. Remembered, because it is a
+  // preference about the window, not about this session.
+  const [railCollapsed, setRailCollapsed] = useState(
+    () => localStorage.getItem('rail-collapsed') === '1',
+  )
+
+  useEffect(() => {
+    localStorage.setItem('rail-collapsed', railCollapsed ? '1' : '0')
+  }, [railCollapsed])
   const [summary, setSummary] = useState<SummaryView | null>(null)
   const [query, setQuery] = useState('')
   const [toasts, setToasts] = useState<AppNotification[]>([])
@@ -211,7 +221,21 @@ export function App() {
         onExpire={(id) => setToasts((current) => current.filter((toast) => toast.id !== id))}
       />
       <div className="shell">
-      <aside className="sidebar">
+      <aside className={`sidebar${railCollapsed ? ' sidebar-narrow' : ''}`}>
+        {/* Folds the menu down to its icons, for when the table matters more
+            than knowing what the icons mean. */}
+        <button
+          className="rail-toggle"
+          onClick={() => setRailCollapsed((current) => !current)}
+          title={railCollapsed ? 'Show the menu' : 'Collapse the menu'}
+          aria-label={railCollapsed ? 'Show the menu' : 'Collapse the menu'}
+        >
+          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5"
+            strokeLinecap="round" strokeLinejoin="round" style={{ width: 13, height: 13 }}>
+            <path d={railCollapsed ? 'M6 3l5 5-5 5' : 'M10 3L5 8l5 5'} />
+          </svg>
+        </button>
+
         <div className="sidebar-nav">
         {NAV.map((item) => (
           <button
@@ -219,7 +243,7 @@ export function App() {
             className={`nav-item${screen === item.label ? ' active' : ''}`}
             onClick={() => setScreen(item.label)}
           >
-            <span className="nav-left">
+            <span className="nav-left" title={item.label}>
               <svg
                 className="nav-icon"
                 viewBox="0 0 16 16"
@@ -231,7 +255,7 @@ export function App() {
               >
                 <path d={item.icon} />
               </svg>
-              <span>{item.label}</span>
+              <span className="nav-label">{item.label}</span>
             </span>
             {item.label === 'Settings' && (crashCount > 0 || (summary?.reviewCount ?? 0) > 0) && (
               <span className="nav-badge">{crashCount + (summary?.reviewCount ?? 0)}</span>
@@ -239,6 +263,9 @@ export function App() {
           </button>
         ))}
         </div>
+
+        {/* Directly above the account: what the app is doing on its own. */}
+        <ActivityButton />
 
         <button
           className="account-chip"
@@ -274,7 +301,7 @@ export function App() {
               hasMail={(summary?.messageCount ?? 0) > 0}
             />
           )}
-          {screen === 'Inventory' && <Inventory query={query} dataVersion={dataVersion} />}
+          {screen === 'Inventory' && <Inventory query={query} dataVersion={dataVersion} onSearch={setQuery} />}
           {screen === 'Shipments' && <Shipments query={query} dataVersion={dataVersion} />}
           {screen === 'Purchases' && <Purchases query={query} dataVersion={dataVersion} />}
           {screen === 'Review' && <Review dataVersion={dataVersion} />}
