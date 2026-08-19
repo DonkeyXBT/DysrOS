@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
+import { simpleParser } from 'mailparser'
 import { basename, dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { openDatabase, type Db } from '../core/db/connection.js'
@@ -11,6 +12,7 @@ import { ParserRegistry } from '../core/parsers/registry.js'
 import { BOL_PARSERS } from '../core/parsers/bol.js'
 import { DHL_PARSERS } from '../core/parsers/dhl.js'
 import { POSTNL_PARSERS } from '../core/parsers/postnl.js'
+import { VINTED_PARSERS } from '../core/parsers/vinted.js'
 import { MEDIAMARKT_PARSERS } from '../core/parsers/mediamarkt.js'
 import { PROSHOP_PARSERS } from '../core/parsers/proshop.js'
 import { POCKETGAMES_PARSERS } from '../core/parsers/pocketgames.js'
@@ -111,6 +113,7 @@ export class AppService {
     // was bought, and DHL's mail is the better source of when it arrives.
     ...DHL_PARSERS,
     ...POSTNL_PARSERS,
+    ...VINTED_PARSERS,
     ...MEDIAMARKT_PARSERS,
     ...PROSHOP_PARSERS,
     ...POCKETGAMES_PARSERS,
@@ -552,6 +555,7 @@ export class AppService {
         // all present. The mail's own hint only ever said the postcode was
         // there, which is half the requirement.
         dhlRedirectable: carrier === 'dhl' && trackingNumber !== null && postalCode !== null,
+        hasLabel: row.label_message_id !== null,
         redirect: row.redirect_outcome
           ? {
             outcome: row.redirect_outcome as string,
@@ -1613,7 +1617,15 @@ export class AppService {
       `SELECT SUM(i.cost_minor) AS total FROM items i
        JOIN sales sa ON sa.item_id = i.id`,
     )
-    const netProfit = revenue - soldCost
+    // Only sales whose goods are known can say what was earned. A marketplace
+    // sale of something bought elsewhere has revenue and no cost, and counting
+    // it as profit is how a dashboard ends up claiming money nobody made.
+    const costedRevenue = sum(
+      `SELECT SUM(sa.payout_minor) AS total FROM sales sa
+       JOIN items i ON i.id = sa.item_id`,
+    )
+    const uncosted = count('SELECT COUNT(*) AS n FROM sales WHERE item_id IS NULL')
+    const netProfit = costedRevenue - soldCost
     const salesRecorded = count('SELECT COUNT(*) AS n FROM sales')
 
     const channels = (this.db.prepare(
@@ -1741,8 +1753,9 @@ export class AppService {
         netMinor: netProfit,
         revenue: formatMoney(money(revenue, 'EUR')),
         fees: formatMoney(money(fees, 'EUR')),
-        marginPercent: revenue > 0 ? Math.round((netProfit / revenue) * 1000) / 10 : 0,
+        marginPercent: costedRevenue > 0 ? Math.round((netProfit / costedRevenue) * 1000) / 10 : 0,
         salesRecorded,
+        uncosted,
         channels,
       },
       money: {
@@ -1937,8 +1950,11 @@ export class AppService {
     },
   ): { sold: number; grossMinor: number; profitMinor: number; vatMinor: number } {
     const rows = this.db.prepare(
-      `SELECT id, cost_minor, cost_currency FROM items WHERE id IN (${itemIds.map(() => '?').join(',')})`,
-    ).all(...itemIds) as { id: string; cost_minor: number; cost_currency: string }[]
+      `SELECT id, title, cost_minor, cost_currency FROM items
+       WHERE id IN (${itemIds.map(() => '?').join(',')})`,
+    ).all(...itemIds) as {
+      id: string; title: string; cost_minor: number; cost_currency: string
+    }[]
 
     if (rows.length === 0) return { sold: 0, grossMinor: 0, profitMinor: 0, vatMinor: 0 }
 
@@ -1958,14 +1974,16 @@ export class AppService {
         this.db.prepare('DELETE FROM sales WHERE item_id = ?').run(line.itemId)
         this.db.prepare(
           `INSERT INTO sales
-             (id, item_id, marketplace, external_order_id, buyer, note, price_included_vat,
-              sold_at, currency, gross_minor, vat_minor, vat_rate_bp, payout_minor, created_at)
-           VALUES (?, ?, 'offline', NULL, ?, ?, ?, ?, 'EUR', ?, ?, ?, ?, ?)`,
+             (id, item_id, marketplace, external_order_id, buyer, note, title,
+              price_included_vat, sold_at, currency, gross_minor, vat_minor,
+              vat_rate_bp, payout_minor, created_at)
+           VALUES (?, ?, 'offline', NULL, ?, ?, ?, ?, ?, 'EUR', ?, ?, ?, ?, ?)`,
         ).run(
           saleKey(line.itemId, soldAt),
           line.itemId,
           buyer,
           input.note?.trim() || null,
+          rows.find((row) => row.id === line.itemId)?.title ?? null,
           input.includesVat ? 1 : 0,
           soldAt,
           line.grossMinor,
@@ -2095,6 +2113,164 @@ export class AppService {
     ).run(purchaseId)
   }
 
+  /**
+   * Everything sold, newest first.
+   *
+   * A sale is a row of its own rather than a state of an item, because it has
+   * facts an item does not: who bought it, when, for how much, and whether the
+   * price they paid already had VAT in it. Editing any of those is editing the
+   * sale, not the goods.
+   */
+  listSales(): SaleView[] {
+    const rows = this.db.prepare(
+      `SELECT sa.id, sa.item_id, sa.marketplace, sa.buyer, sa.note, sa.sold_at,
+              sa.gross_minor, sa.vat_minor, sa.price_included_vat, sa.currency,
+              COALESCE(sa.title, i.title) AS title,
+              i.image_url AS image_url, i.cost_minor AS cost_minor,
+              p.retailer AS retailer,
+              COALESCE(sa.external_order_id, p.external_order_id) AS order_ref
+       FROM sales sa
+       LEFT JOIN items i ON i.id = sa.item_id
+       LEFT JOIN purchases p ON p.id = i.purchase_id
+       ORDER BY sa.sold_at DESC, sa.id`,
+    ).all() as Record<string, unknown>[]
+
+    return rows.map((row) => {
+      const gross = (row.gross_minor as number) ?? 0
+      // A marketplace sale of something never bought through this application
+      // has no cost to measure against, and inventing zero would read as pure
+      // profit.
+      const cost = (row.cost_minor as number | null) ?? null
+      const profit = cost === null ? null : gross - cost
+      return {
+        id: row.id as string,
+        itemId: (row.item_id as string | null) ?? null,
+        title: (row.title as string | null) ?? 'Unknown item',
+        imageUrl: (row.image_url as string | null) ?? null,
+        buyer: (row.buyer as string | null) ?? null,
+        note: (row.note as string | null) ?? null,
+        soldAt: row.sold_at as string,
+        channel: row.marketplace as string,
+        retailer: (row.retailer as string | null) ?? null,
+        orderRef: (row.order_ref as string | null) ?? null,
+        grossMinor: gross,
+        gross: formatMoney(money(gross, 'EUR')),
+        vatMinor: (row.vat_minor as number) ?? 0,
+        vat: formatMoney(money((row.vat_minor as number) ?? 0, 'EUR')),
+        includedVat: (row.price_included_vat as number) === 1,
+        costMinor: cost,
+        cost: cost === null ? null : formatMoney(money(cost, 'EUR')),
+        profitMinor: profit,
+        profit: profit === null ? null : formatMoney(money(profit, 'EUR')),
+      }
+    })
+  }
+
+  /**
+   * Corrects a sale already recorded.
+   *
+   * A price agreed in a hurry is often written down wrong, and the VAT split
+   * follows from the price rather than being typed, so it is worked out again
+   * here rather than being left as it was.
+   */
+  updateSale(
+    saleId: string,
+    input: {
+      amountMinor?: number
+      includesVat?: boolean
+      buyer?: string | null
+      note?: string | null
+      soldAt?: string
+    },
+  ): SaleView | null {
+    const existing = this.db.prepare(
+      `SELECT id, item_id, gross_minor, price_included_vat, sold_at, buyer, note
+       FROM sales WHERE id = ?`,
+    ).get(saleId) as {
+      id: string; item_id: string | null; gross_minor: number
+      price_included_vat: number; sold_at: string
+      buyer: string | null; note: string | null
+    } | undefined
+    if (!existing) return null
+
+    const includesVat = input.includesVat ?? existing.price_included_vat === 1
+    const amountMinor = input.amountMinor ?? existing.gross_minor
+    const cost = existing.item_id
+      ? ((this.db.prepare('SELECT cost_minor FROM items WHERE id = ?').get(existing.item_id) as
+        { cost_minor: number } | undefined)?.cost_minor ?? 0)
+      : 0
+
+    const breakdown = breakDownSale({
+      lines: [{ itemId: existing.item_id ?? saleId, costMinor: cost }],
+      amountMinor,
+      includesVat,
+    })
+    const line = breakdown.lines[0]!
+
+    this.db.prepare(
+      `UPDATE sales
+       SET gross_minor = ?, payout_minor = ?, vat_minor = ?, vat_rate_bp = ?,
+           price_included_vat = ?, buyer = ?, note = ?, sold_at = ?
+       WHERE id = ?`,
+    ).run(
+      line.grossMinor,
+      line.grossMinor,
+      line.vatMinor,
+      breakdown.rateBasisPoints,
+      includesVat ? 1 : 0,
+      // Left out means left alone; given but blank means cleared.
+      input.buyer === undefined ? existing.buyer : (input.buyer?.trim() || null),
+      input.note === undefined ? existing.note : (input.note?.trim() || null),
+      input.soldAt ?? existing.sold_at,
+      saleId,
+    )
+
+    return this.listSales().find((sale) => sale.id === saleId) ?? null
+  }
+
+  /** Undoes one sale, putting its unit back in stock. */
+  deleteSale(saleId: string): boolean {
+    const sale = this.db
+      .prepare('SELECT item_id FROM sales WHERE id = ?')
+      .get(saleId) as { item_id: string | null } | undefined
+    if (!sale) return false
+
+    this.db.prepare('DELETE FROM sales WHERE id = ?').run(saleId)
+    if (sale.item_id) {
+      this.db.prepare("UPDATE items SET status = 'in_stock' WHERE id = ? AND status = 'sold'")
+        .run(sale.item_id)
+    }
+    return true
+  }
+
+  /**
+   * The shipping label a marketplace sent, as the file it was attached as.
+   *
+   * The PDF is not copied anywhere when the mail is read — the stored mail is
+   * the copy — so it is fetched from there at the moment someone asks to print
+   * it. Nothing is generated: this is the carrier's own label, unchanged.
+   */
+  async labelFor(shipmentId: string): Promise<{ name: string; content: Buffer } | null> {
+    const parcel = this.db.prepare(
+      'SELECT label_message_id, tracking_number FROM shipments WHERE id = ?',
+    ).get(shipmentId) as { label_message_id: string | null; tracking_number: string | null } | undefined
+    if (!parcel?.label_message_id) return null
+
+    const message = this.db.prepare(
+      'SELECT raw_path FROM messages WHERE message_id = ? OR id = ?',
+    ).get(parcel.label_message_id, parcel.label_message_id) as { raw_path: string } | undefined
+    if (!message?.raw_path || !existsSync(message.raw_path)) return null
+
+    const parsed = await simpleParser(readFileSync(message.raw_path))
+    const pdf = (parsed.attachments ?? []).find((file) => /pdf/i.test(file.contentType))
+    if (!pdf) return null
+
+    return {
+      name: pdf.filename ?? `label-${parcel.tracking_number ?? shipmentId}.pdf`,
+      content: Buffer.from(pdf.content as Buffer),
+    }
+  }
+
   /** Rows for the DHL ServicePoint redirect tool's `trackings.csv`. */
   redirectCsv(): string {
     const rows = this.listShipments().filter(
@@ -2147,6 +2323,8 @@ export interface ShipmentView {
   postalCode: string | null
   city: string | null
   dhlRedirectable: boolean
+  /** True when a marketplace attached a shipping label to its mail. */
+  hasLabel: boolean
   /** The last attempt to send this parcel to a ServicePoint, if there was one. */
   redirect: {
     outcome: string
@@ -2249,6 +2427,31 @@ export interface ItemView {
   orderRef: string | null
 }
 
+export interface SaleView {
+  id: string
+  itemId: string | null
+  title: string
+  imageUrl: string | null
+  buyer: string | null
+  note: string | null
+  soldAt: string
+  /** `offline` for a private sale; a marketplace name once one is connected. */
+  channel: string
+  retailer: string | null
+  orderRef: string | null
+  grossMinor: number
+  gross: string
+  vatMinor: number
+  vat: string
+  /** True when the price already had VAT in it, as a private buyer pays. */
+  includedVat: boolean
+  /** Null when the goods were never bought through this application. */
+  costMinor: number | null
+  cost: string | null
+  profitMinor: number | null
+  profit: string | null
+}
+
 export interface AycdStatusView {
   configured: boolean
   running: boolean
@@ -2285,6 +2488,8 @@ export interface DashboardView {
     fees: string
     marginPercent: number
     salesRecorded: number
+    /** Sales whose goods were bought outside this application. */
+    uncosted: number
     channels: { name: string; value: string; minor: number }[]
   }
   money: { out: string; in: string; salesRecorded: number }

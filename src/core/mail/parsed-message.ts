@@ -13,6 +13,9 @@ export interface ParsedMessage {
   receivedAt: string
   text: string
   html: string
+  /** Files carried by the mail — a shipping label, most usefully. Described
+   *  rather than held: the bytes stay in the stored copy until asked for. */
+  attachments: { filename: string | null; contentType: string; size: number }[]
 }
 
 export async function loadEml(raw: string | Buffer): Promise<ParsedMessage> {
@@ -27,6 +30,11 @@ export async function loadEml(raw: string | Buffer): Promise<ParsedMessage> {
     receivedAt: (mail.date ?? new Date(0)).toISOString(),
     text: mail.text ?? '',
     html: typeof mail.html === 'string' ? mail.html : '',
+    attachments: (mail.attachments ?? []).map((file) => ({
+      filename: file.filename ?? null,
+      contentType: file.contentType ?? 'application/octet-stream',
+      size: file.size ?? 0,
+    })),
   }
 }
 

@@ -101,6 +101,11 @@ const api = {
   sellItems: (ids: string[], input: unknown) => ipcRenderer.invoke('sell-items', ids, input),
   unsellItems: (ids: string[]) => ipcRenderer.invoke('unsell-items', ids),
   vatPosition: () => ipcRenderer.invoke('vat-position'),
+  sales: () => ipcRenderer.invoke('sales'),
+  saveLabel: (shipmentId: string) => ipcRenderer.invoke('save-label', shipmentId),
+  openLabel: (shipmentId: string) => ipcRenderer.invoke('open-label', shipmentId),
+  updateSale: (id: string, input: unknown) => ipcRenderer.invoke('update-sale', id, input),
+  deleteSale: (id: string) => ipcRenderer.invoke('delete-sale', id),
   onActivity: (handler: (entries: unknown[]) => void) => {
     const listener = (_e: unknown, entries: unknown[]) => handler(entries)
     ipcRenderer.on('activity', listener)

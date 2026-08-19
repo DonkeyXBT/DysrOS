@@ -245,6 +245,20 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                             : [...current, shipment.id]),
                       },
                       {
+                        label: 'Save the shipping label…',
+                        disabled: !shipment.hasLabel,
+                        onSelect: async () => {
+                          const result = await api.saveLabel(shipment.id)
+                          if (result.saved) setExported(`Label saved to ${result.path}`)
+                          else if (result.reason) setExported(result.reason)
+                        },
+                      },
+                      {
+                        label: 'Open the shipping label',
+                        disabled: !shipment.hasLabel,
+                        onSelect: () => void api.openLabel(shipment.id),
+                      },
+                      {
                         label: 'Copy tracking code',
                         disabled: !shipment.trackingNumber,
                         onSelect: () =>
@@ -488,6 +502,27 @@ function Detail({ shipment, onClose }: { shipment: ShipmentView; onClose: () => 
         value={[shipment.expectedDeliveryAt, shipment.deliveryWindow].filter(Boolean).join(' · ') || '—'}
         mono
       />
+      {shipment.hasLabel && (
+        <div
+          style={{
+            border: '1px solid #2b3a5e', background: 'rgba(91,140,255,.08)',
+            borderRadius: 12, padding: '10px 11px',
+            display: 'flex', flexDirection: 'column', gap: 6,
+          }}
+        >
+          <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--accent-bright)' }}>
+            Shipping label
+          </div>
+          <div style={{ fontSize: 11.5, color: 'var(--text-dim)', lineHeight: 1.45 }}>
+            The marketplace attached it to its mail. This is that file, unchanged.
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button className="btn" onClick={() => void api.openLabel(shipment.id)}>Open</button>
+            <button className="btn" onClick={() => void api.saveLabel(shipment.id)}>Save as…</button>
+          </div>
+        </div>
+      )}
+
       <Field label="Tracking code" value={shipment.trackingNumber ?? '—'} mono />
       <TrackingLink url={shipment.trackingUrl} />
       <Field label="Postcode" value={shipment.postalCode ?? '—'} mono />

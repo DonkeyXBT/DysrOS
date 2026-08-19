@@ -695,6 +695,44 @@ app.whenReady().then(() => {
     return count
   })
   ipcMain.handle('vat-position', () => service.vatPosition())
+  ipcMain.handle('sales', () => service.listSales())
+  handle('save-label', async (shipmentId: string) => {
+    const label = await service.labelFor(shipmentId)
+    if (!label) {
+      return { saved: false, reason: 'No label was attached to the mail for this parcel.' }
+    }
+    const picked = await dialog.showSaveDialog({
+      title: 'Save the shipping label',
+      defaultPath: join(app.getPath('downloads'), label.name),
+      filters: [{ name: 'PDF', extensions: ['pdf'] }],
+    })
+    if (picked.canceled || !picked.filePath) return { saved: false }
+    writeFileSync(picked.filePath, label.content)
+    return { saved: true, path: picked.filePath }
+  })
+  handle('open-label', async (shipmentId: string) => {
+    const label = await service.labelFor(shipmentId)
+    if (!label) return { opened: false }
+    // Written beside the database rather than into Downloads: this is a
+    // temporary copy so the system's own reader can show it.
+    const path = join(app.getPath('temp'), label.name)
+    writeFileSync(path, label.content)
+    await shell.openPath(path)
+    return { opened: true, path }
+  })
+  handle('update-sale', (id: string, input: {
+    amountMinor?: number; includesVat?: boolean
+    buyer?: string | null; note?: string | null; soldAt?: string
+  }) => {
+    const sale = service.updateSale(id, input)
+    mainWindow?.webContents.send('mail-updated', { sale: id })
+    return sale
+  })
+  handle('delete-sale', (id: string) => {
+    const removed = service.deleteSale(id)
+    mainWindow?.webContents.send('mail-updated', { sale: id })
+    return removed
+  })
   ipcMain.handle('redirect-email', () => service.redirectEmail())
   ipcMain.handle('redirect-set-email', (_event, email: string) => service.setRedirectEmail(email))
 

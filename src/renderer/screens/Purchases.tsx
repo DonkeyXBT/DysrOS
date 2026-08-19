@@ -200,14 +200,21 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
                   </span>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                  {isCancel ? (
+                  {/* Only worth saying when something is wrong. That an order's
+                      parts add up is the ordinary case, and saying so on every
+                      row is noise. */}
+                  {isCancel && (
                     <span style={{ fontSize: 11, color: 'var(--text-ghost)' }}>
                       no matching order
                     </span>
-                  ) : row.totalsConsistent ? (
-                    <span style={{ fontSize: 11, color: 'var(--teal)' }}>totals check out</span>
-                  ) : (
-                    <span style={{ fontSize: 11, color: 'var(--warm)' }}>totals disagree</span>
+                  )}
+                  {!isCancel && !row.totalsConsistent && (
+                    <span
+                      style={{ fontSize: 11, color: 'var(--warm)' }}
+                      title="Quantity times the unit price plus postage does not equal the stated total, so something was read from the wrong line."
+                    >
+                      totals disagree
+                    </span>
                   )}
                   {row.refundOutstanding && (
                     <span className="mono" style={{ fontSize: 11, color: 'var(--pink)' }}>
