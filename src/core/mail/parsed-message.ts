@@ -26,9 +26,27 @@ export interface ParsedMessage {
   attachments: { filename: string | null; contentType: string; size: number }[]
 }
 
+/**
+ * A body saved straight out of a mail client: HTML, and no envelope at all.
+ *
+ * Leading comments and whitespace are skipped because that is how these files
+ * really start — DHL's begins with a comment banner before the doctype. An
+ * actual `.eml` begins with headers, never with markup, so there is nothing
+ * for this to mistake.
+ */
+const BARE_HTML = /^\s*(?:<!--[\s\S]*?-->\s*)*<(?:!doctype\s+html|html[\s>])/i
+
 export async function loadEml(raw: string | Buffer): Promise<ParsedMessage> {
   const mail = await simpleParser(raw)
   const sender = mail.from?.value?.[0]
+
+  const source = typeof raw === 'string' ? raw : raw.toString('utf8')
+  // Without headers there is no MIME structure to find a body in, so the file
+  // is read as plain text — which leaves every parser that matches on the
+  // mail's markup with nothing to match. The file *is* the body.
+  const html = typeof mail.html === 'string'
+    ? mail.html
+    : BARE_HTML.test(source.slice(0, 4096)) ? source : ''
 
   return {
     messageId: mail.messageId ?? null,
@@ -37,7 +55,7 @@ export async function loadEml(raw: string | Buffer): Promise<ParsedMessage> {
     subject: mail.subject ?? '',
     receivedAt: (mail.date ?? new Date(0)).toISOString(),
     text: mail.text ?? '',
-    html: typeof mail.html === 'string' ? mail.html : '',
+    html,
     toAddress: recipientOf(mail),
     attachments: (mail.attachments ?? []).map((file) => ({
       filename: file.filename ?? null,

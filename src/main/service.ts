@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync, mkdirSync, statSync, writeFileSync, rmSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { simpleParser } from 'mailparser'
 import { basename, dirname, join } from 'node:path'
@@ -7,8 +7,8 @@ import { openDatabase, type Db } from '../core/db/connection.js'
 import { migrate, currentVersion } from '../core/db/migrations.js'
 import { MessageRepo, hashContent } from '../core/repos/messages.js'
 import { EventRepo, type StoredEvent } from '../core/repos/events.js'
-import { loadEml, textOf } from '../core/mail/parsed-message.js'
-import { ParserRegistry } from '../core/parsers/registry.js'
+import { loadEml, textOf, type ParsedMessage } from '../core/mail/parsed-message.js'
+import { ParserRegistry, type ParserFailure } from '../core/parsers/registry.js'
 import { BOL_PARSERS } from '../core/parsers/bol.js'
 import { DHL_PARSERS } from '../core/parsers/dhl.js'
 import { POSTNL_PARSERS } from '../core/parsers/postnl.js'
@@ -127,6 +127,20 @@ export async function inParallel<T>(
     }
   })
   await Promise.all(workers)
+}
+
+/** The date of a mail with no envelope: the one in its filename, or the file's own. */
+function dateFile(message: ParsedMessage, path: string): ParsedMessage {
+  // A body saved out of a mail client carries no Date header, and a mail dated
+  // 1970 sorts to the bottom of every list and lands outside every window.
+  if (message.receivedAt !== new Date(0).toISOString()) return message
+
+  const named = /(\d{4})-(\d{2})-(\d{2})/.exec(basename(path))
+  const receivedAt = named
+    ? new Date(`${named[1]}-${named[2]}-${named[3]}T12:00:00Z`).toISOString()
+    : statSync(path).mtime.toISOString()
+
+  return { ...message, receivedAt }
 }
 
 /**
@@ -494,7 +508,7 @@ export class AppService {
    */
   async importEml(path: string): Promise<{ subject: string; parserId: string | null; events: number }> {
     const raw = readFileSync(path)
-    const parsed = await loadEml(raw)
+    const parsed = dateFile(await loadEml(raw), path)
     const now = new Date().toISOString()
 
     const stored = this.messages.upsert({
@@ -826,6 +840,17 @@ export class AppService {
        ORDER BY received_at DESC`,
     ).all() as { id: string }[]
     return rows.map((row) => row.id)
+  }
+
+  /**
+   * Parsers that threw while reading mail, rather than declining it.
+   *
+   * A parser that throws is skipped so one retailer's changed template cannot
+   * stop every other mail from being read. That makes it silent, which is why
+   * it is worth being able to ask.
+   */
+  parserFailures(): ParserFailure[] {
+    return this.registry.failures
   }
 
   listReviewQueue(): ReviewView[] {
