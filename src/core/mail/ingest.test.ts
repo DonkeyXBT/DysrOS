@@ -308,3 +308,59 @@ describe('lookback window', () => {
     expect(searches).toBe(1)
   })
 })
+
+describe('draining a mailbox', () => {
+  it('keeps fetching until the folder is exhausted, not just one batch', async () => {
+    const messages = Array.from({ length: 500 }, (_, i) => msg(i + 1))
+    const asked: number[] = []
+    const mailbox = fakeMailbox({
+      uidValidity: 100,
+      messages,
+      onFetch: (afterUid) => asked.push(afterUid),
+    })
+    const { sink } = recordingSink()
+
+    const result = await sync.sync('acc1', 'INBOX', mailbox, sink, { limit: 5000, batchSize: 200 })
+
+    // Three batches of 200, 200 and 100 — the whole mailbox, in one run.
+    expect(asked).toEqual([0, 200, 400])
+    expect(result.fetched).toBe(500)
+    expect(result.lastUid).toBe(500)
+    expect(result.remaining).toBe(false)
+  })
+
+  it('says so when it stops at the ceiling with mail still waiting', async () => {
+    const messages = Array.from({ length: 60 }, (_, i) => msg(i + 1))
+    const mailbox = fakeMailbox({ uidValidity: 100, messages })
+    const { sink } = recordingSink()
+
+    const first = await sync.sync('acc1', 'INBOX', mailbox, sink, { limit: 40, batchSize: 20 })
+    expect(first.fetched).toBe(40)
+    expect(first.remaining).toBe(true)
+
+    // The next run carries on from where that one stopped.
+    const second = await sync.sync('acc1', 'INBOX', mailbox, sink, { limit: 40, batchSize: 20 })
+    expect(second.fetched).toBe(20)
+    expect(second.remaining).toBe(false)
+    expect(second.lastUid).toBe(60)
+  })
+
+  it('records the cursor after each batch so an interrupted run keeps its place', async () => {
+    const messages = Array.from({ length: 30 }, (_, i) => msg(i + 1))
+    const mailbox = fakeMailbox({ uidValidity: 100, messages })
+    let handled = 0
+    const sink = async () => {
+      handled += 1
+      // Fails part way through the second batch, as a dropped connection would.
+      if (handled > 15) throw new Error('connection reset')
+      return true
+    }
+
+    await expect(
+      sync.sync('acc1', 'INBOX', mailbox, sink, { limit: 5000, batchSize: 10 }),
+    ).rejects.toThrow('connection reset')
+
+    // The first ten are kept; the run resumes there rather than from the start.
+    expect(sync.readCursor('acc1', 'INBOX')).toEqual({ uidValidity: 100, lastUid: 10 })
+  })
+})

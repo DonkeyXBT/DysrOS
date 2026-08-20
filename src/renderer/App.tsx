@@ -172,7 +172,10 @@ export function App() {
         : result.accounts === 0
           ? 'No mailbox connected yet - add one in Settings.'
           : `Pulled ${result.fetched} message${result.fetched === 1 ? '' : 's'} from ` +
-            `${result.accounts} account${result.accounts === 1 ? '' : 's'} - ${result.stored} new`
+            `${result.accounts} account${result.accounts === 1 ? '' : 's'} - ${result.stored} new` +
+            // Said out loud rather than left to be noticed: a mailbox with more
+            // than one run's worth of mail is still being read.
+            (result.remaining ? ' · still reading the rest' : '')
       notify(result.failures.length > 0 ? 'warn' : 'info', message)
       await refresh()
     } catch (error) {

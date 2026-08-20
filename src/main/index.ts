@@ -171,6 +171,7 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
   fetched: number
   stored: number
   failures: { email: string; error: string }[]
+  remaining?: boolean
   skipped?: boolean
 }> {
   if (syncInFlight) {
@@ -202,8 +203,20 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
     for (const failure of result.failures) {
       log.record('warn', 'sync', new Error(failure.error), `account: ${failure.email}`)
     }
-    log.record('info', 'sync', `${reason} sync finished: ${result.fetched} fetched, ${result.stored} new`)
-    activity.finish('sync', `${result.fetched} read, ${result.stored} new`)
+    log.record(
+      'info',
+      'sync',
+      `${reason} sync finished: ${result.fetched} fetched, ${result.stored} new`
+        + (result.remaining ? ', more waiting' : ''),
+    )
+    activity.finish(
+      'sync',
+      `${result.fetched} read, ${result.stored} new${result.remaining ? ' · more to come' : ''}`,
+    )
+    // A mailbox that hit the ceiling still has mail waiting. Carrying on now,
+    // rather than at the next scheduled pass, is the difference between a
+    // large mailbox arriving today and arriving over the next several hours.
+    if (result.remaining) syncAgainWhenDone = true
     mainWindow?.webContents.send('mail-updated', result)
 
     // Barcodes are only reachable by following the retailer's redirect, so the

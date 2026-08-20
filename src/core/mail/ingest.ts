@@ -50,6 +50,8 @@ export interface SyncResult {
   lastUid: number
   /** True when this run started from the lookback window rather than a cursor. */
   startedFresh: boolean
+  /** True when the run stopped at its ceiling with mail still waiting. */
+  remaining: boolean
 }
 
 /** Called for each fetched message; returns true when it was newly stored. */
@@ -85,9 +87,15 @@ export class MailboxSync {
     folder: string,
     client: MailboxClient,
     sink: MessageSink,
-    options: { limit?: number; initialLookbackDays?: number } = {},
+    options: { limit?: number; batchSize?: number; initialLookbackDays?: number } = {},
   ): Promise<SyncResult> {
-    const limit = options.limit ?? 200
+    // The ceiling is the most one run will read, and the batch is how much is
+    // asked for at a time. They are separate because a mailbox holding more
+    // than one batch has to be *drained*, not truncated: stopping after the
+    // first batch and calling the sync finished leaves mail unread with
+    // nothing saying so.
+    const ceiling = options.limit ?? 200
+    const batchSize = Math.max(1, Math.min(options.batchSize ?? 200, ceiling))
     // One week on a first sync. A busy mailbox holds thousands of messages a
     // month, almost none of them relevant, and a first run that grinds through
     // them all reads as broken. The hourly pass keeps up from there.
@@ -113,31 +121,55 @@ export class MailboxSync {
         afterUid = firstRecent === null ? 0 : Math.max(0, firstRecent - 1)
       }
 
-      const messages = await client.fetchSince(afterUid, limit)
-
+      let fetched = 0
       let stored = 0
       let duplicates = 0
       let lastUid = afterUid
+      let remaining = false
 
-      for (const message of messages) {
-        const isNew = await sink({ accountId, folder, uid: message.uid, raw: message.raw })
-        if (isNew) stored += 1
-        else duplicates += 1
-        // Advance only past messages actually handled, so an interrupted sync
-        // resumes from the right place rather than skipping the remainder.
-        if (message.uid > lastUid) lastUid = message.uid
+      for (;;) {
+        const room = ceiling - fetched
+        if (room <= 0) {
+          // Stopped because this run has read its fill. Whether more is truly
+          // waiting is unknown until next time, and saying "maybe" is the
+          // honest answer: it costs one more run and never hides mail.
+          remaining = true
+          break
+        }
+
+        const wanted = Math.min(batchSize, room)
+        const messages = await client.fetchSince(lastUid, wanted)
+        if (messages.length === 0) break
+
+        for (const message of messages) {
+          const isNew = await sink({ accountId, folder, uid: message.uid, raw: message.raw })
+          if (isNew) stored += 1
+          else duplicates += 1
+          // Advance only past messages actually handled, so an interrupted sync
+          // resumes from the right place rather than skipping the remainder.
+          if (message.uid > lastUid) lastUid = message.uid
+        }
+        fetched += messages.length
+
+        // Written after every batch rather than at the end: a run interrupted
+        // by a closed laptop keeps what it read instead of starting over.
+        this.writeCursor(accountId, folder, status.uidValidity, lastUid)
+
+        // A short batch means the folder had nothing more to give.
+        if (messages.length < wanted) break
       }
 
       this.writeCursor(accountId, folder, status.uidValidity, lastUid)
 
       return {
         folder,
-        fetched: messages.length,
+        fetched,
         stored,
         duplicates,
         uidValidityReset,
         lastUid,
         startedFresh: startingFresh,
+        remaining,
       }
     } finally {
       await client.close()
