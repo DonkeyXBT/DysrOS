@@ -2149,3 +2149,23 @@ describe('syncing several mailboxes', () => {
     expect(unreadable.listAccounts()[0]!.lastError).toMatch(/password could not be read/i)
   })
 })
+
+describe('a cancelled PocketGames order', () => {
+  const ORDER = 'Bestelling_71210_bevestigd_0.eml'
+  const CANCELLED = 'Order_71210_has_been_canceled_0.eml'
+  const both = [ORDER, CANCELLED].every((name) => existsSync(fixturePath(name)))
+
+  it.skipIf(!both)('takes the goods out of stock and marks the order cancelled', async () => {
+    await service.importEml(fixturePath(ORDER))
+
+    // Two units, on their way.
+    expect(service.listInventory().filter((i) => i.status === 'incoming')).toHaveLength(2)
+
+    await service.importEml(fixturePath(CANCELLED))
+
+    // Cancelled goods are not stock: they are not coming and cannot be sold.
+    expect(service.listInventory().map((i) => i.status)).not.toContain('incoming')
+    const purchase = service.listPurchases().find((p) => p.reference === '71210')
+    expect(purchase?.status).toBe('cancelled')
+  })
+})
