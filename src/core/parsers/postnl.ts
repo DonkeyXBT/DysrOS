@@ -15,6 +15,16 @@ import { normalisePostnlCode } from '../tracking/resolve-link.js'
 
 const SENDERS = /@(?:[a-z0-9.-]+\.)?postnl\.nl$/i
 
+/**
+ * PostNL's own mail, rather than a shop writing the word "PostNL".
+ *
+ * Their template links back to their own site throughout — forty times in the
+ * sample here — where a shop announcing that PostNL has the parcel links only
+ * to itself. That is the difference, and it matters when the mail arrives
+ * without an envelope: a body saved out of a mail client has no sender at all.
+ */
+const SIGNATURE = /postnl\.nl/i
+
 /** PostNL barcodes: `3S` and eleven to sixteen more characters. */
 const BARCODE = /\b(3[SZ][A-Z0-9]{9,20})\b/
 
@@ -31,7 +41,8 @@ export function findPostnlBarcode(message: ParsedMessage): string | null {
 }
 
 function isPostnlMail(message: ParsedMessage): boolean {
-  return SENDERS.test(message.fromAddress) && findPostnlBarcode(message) !== null
+  const fromPostnl = SENDERS.test(message.fromAddress) || SIGNATURE.test(message.html)
+  return fromPostnl && findPostnlBarcode(message) !== null
 }
 
 /** Who sent the parcel — "je pakket van bol" — as PostNL words it. */
