@@ -181,12 +181,23 @@ describe('shipment reconciliation', () => {
 })
 
 describe('cancellation reconciliation', () => {
-  it('reverses the items rather than deleting them', () => {
+  it('reverses the unit it names rather than deleting anything', () => {
     record(order({ payload: { ...order().payload, quantity: 2 } }))
     record(cancellation())
     reconciler.run(NOW)
 
+    // A cancellation of one article out of two leaves the other standing: an
+    // order of two where one was cancelled is still an order of one.
     expect(items()).toHaveLength(2)
+    expect(items().filter((item) => item.status === 'cancelled')).toHaveLength(1)
+    expect(purchases()[0]!.status).toBe('partly_cancelled')
+  })
+
+  it('cancels the whole order when the mail names every unit of it', () => {
+    record(order({ payload: { ...order().payload, quantity: 2 } }))
+    record(cancellation({ payload: { ...cancellation().payload, quantity: 2 } }))
+    reconciler.run(NOW)
+
     expect(items().every((item) => item.status === 'cancelled')).toBe(true)
     expect(purchases()[0]!.status).toBe('cancelled')
   })

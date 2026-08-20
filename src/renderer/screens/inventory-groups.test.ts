@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { groupByProduct } from './inventory-groups.js'
+import { groupByProduct, heldUnits } from './inventory-groups.js'
 import type { ItemView } from '../api.js'
 
 function unit(overrides: Partial<ItemView> = {}): ItemView {
@@ -121,5 +121,37 @@ describe('what a product earned', () => {
   it('counts nothing earned for a product still entirely in stock', () => {
     const groups = groupByProduct([unit(), unit()])
     expect(groups[0]).toMatchObject({ soldMinor: 0, profitMinor: 0 })
+  })
+})
+
+describe('what counts as inventory', () => {
+  it('keeps what is still yours', () => {
+    const held = heldUnits([
+      unit({ status: 'incoming' }),
+      unit({ status: 'in_stock' }),
+      unit({ status: 'listed' }),
+    ])
+    expect(held).toHaveLength(3)
+  })
+
+  it('drops a unit that was cancelled before it ever arrived', () => {
+    expect(heldUnits([unit({ status: 'cancelled' })])).toEqual([])
+  })
+
+  it('drops one that was sold, and one that went back', () => {
+    expect(heldUnits([
+      unit({ status: 'sold' }),
+      unit({ status: 'returned' }),
+      unit({ status: 'shipped_to_buyer' }),
+    ])).toEqual([])
+  })
+
+  it('keeps the ones that are still coming alongside the ones in the room', () => {
+    const held = heldUnits([
+      unit({ id: 'a', status: 'incoming' }),
+      unit({ id: 'b', status: 'cancelled' }),
+      unit({ id: 'c', status: 'in_stock' }),
+    ])
+    expect(held.map((item) => item.id)).toEqual(['a', 'c'])
   })
 })

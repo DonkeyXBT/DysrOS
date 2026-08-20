@@ -370,7 +370,103 @@ export const bolShipmentPending: Parser = {
   },
 }
 
+/**
+ * "Je retour is verwerkt" — the goods are back with bol and the money follows.
+ *
+ * The mail names the article but no amount: bol says the money is on its way
+ * within five working days and leaves it at that. What the unit cost is
+ * already recorded against the order, so the refund is worked out from there
+ * rather than guessed at here.
+ */
+export const bolReturnProcessed: Parser = {
+  id: 'bol-return-processed',
+  retailer: 'bol',
+
+  matches(message) {
+    if (message.fromAddress !== SENDER) return false
+    return templateIs(message, 'CLI_RETURN_RECEIPT')
+      || /retour is verwerkt|retour ontvangen/i.test(message.subject)
+  },
+
+  parse(message): ParsedEvent[] {
+    const all = lines(message)
+
+    // The article sits under the heading that says what was processed.
+    const headingIndex = all.findIndex((line) => /^dit hebben we verwerkt$/i.test(line))
+    const titleIndex = headingIndex === -1
+      ? -1
+      : all.findIndex((line, i) => i > headingIndex && !/^\d+\s+artikel(en)?$/i.test(line))
+    const title = titleIndex === -1 ? null : (all[titleIndex] ?? null)
+
+    return [{
+      type: 'refunded',
+      retailer: 'bol',
+      externalOrderId: findOrderReference(all) ?? orderReferenceFromSubject(message.subject),
+      occurredAt: message.receivedAt,
+      payload: {
+        reason: 'return',
+        title,
+        imageUrl: findProductImage(message.html, title),
+        quantity: titleIndex === -1 ? 1 : quantityAfter(all, titleIndex),
+        currency: 'EUR',
+        // bol states no amount in this mail. The order knows what the unit
+        // cost, and inventing a figure here would be worse than deriving one.
+        amountMinor: null,
+        receivedAt: null,
+      },
+    }]
+  },
+}
+
+/**
+ * "Je hebt je pakket opgehaald" — collected from a pickup point.
+ *
+ * The parcel's journey ends here just as surely as if someone had handed it
+ * over at the door, so it settles the parcel and puts the goods in stock. A
+ * parcel left at a point and never collected is a different thing entirely,
+ * and this is the mail that tells them apart.
+ */
+export const bolCollected: Parser = {
+  id: 'bol-collected',
+  retailer: 'bol',
+
+  matches(message) {
+    if (message.fromAddress !== SENDER) return false
+    return templateIs(message, 'CLI_COLLECTION_CONFIRMATION')
+      || /opgehaald/i.test(message.subject)
+  },
+
+  parse(message): ParsedEvent[] {
+    const all = lines(message)
+
+    const headingIndex = all.findIndex((line) => /^dit heb je opgehaald$/i.test(line))
+    const titleIndex = headingIndex === -1
+      ? -1
+      : all.findIndex((line, i) => i > headingIndex && !/^\d+\s+artikel(en)?$/i.test(line))
+    const title = titleIndex === -1 ? null : (all[titleIndex] ?? null)
+
+    return [{
+      type: 'delivered',
+      retailer: 'bol',
+      externalOrderId: findOrderReference(all) ?? orderReferenceFromSubject(message.subject),
+      occurredAt: message.receivedAt,
+      payload: {
+        direction: 'inbound',
+        title,
+        imageUrl: findProductImage(message.html, title),
+        quantity: titleIndex === -1 ? 1 : quantityAfter(all, titleIndex),
+        shipmentStatus: 'delivered',
+        collectedFromPoint: true,
+        deliveredAt: message.receivedAt.slice(0, 10),
+        trackingNumber: null,
+      },
+    }]
+  },
+}
+
 export const BOL_PARSERS: readonly Parser[] = [
+  bolReturnProcessed,
+  bolCollected,
   bolOrderConfirmation,
   bolCancellation,
   bolShipmentPending,

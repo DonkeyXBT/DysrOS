@@ -1,5 +1,19 @@
 import type { ItemView } from '../api.js'
 
+/**
+ * The statuses that mean a unit is still yours.
+ *
+ * Incoming is paid for and on its way; in stock and listed are in the room.
+ * Everything else has left — sold, cancelled before it ever arrived, or sent
+ * back — and a list of what you have should not include what you had.
+ */
+const HELD = new Set(['incoming', 'in_stock', 'listed'])
+
+/** What inventory is: units still held or still coming. */
+export function heldUnits(items: ItemView[]): ItemView[] {
+  return items.filter((item) => HELD.has(item.status))
+}
+
 export interface ProductGroup {
   title: string
   imageUrl: string | null

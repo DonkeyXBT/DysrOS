@@ -19,6 +19,9 @@ const STATUS_COLOR: Record<string, string> = {
   delivered: 'oklch(0.78 0.12 148)',
   cancelled: 'oklch(0.62 0.015 265)',
   refunded: 'oklch(0.74 0.10 60)',
+  // Part of an order gone, the rest still standing.
+  partly_cancelled: 'oklch(0.68 0.06 300)',
+  partly_refunded: 'oklch(0.74 0.12 40)',
   partially_refunded: 'oklch(0.74 0.12 40)',
 }
 
@@ -29,6 +32,8 @@ const STATUS_LABEL: Record<string, string> = {
   delivered: 'Delivered',
   cancelled: 'Cancelled',
   refunded: 'Refunded',
+  partly_cancelled: 'Part. cancelled',
+  partly_refunded: 'Part. returned',
   partially_refunded: 'Part. refunded',
 }
 

@@ -5,7 +5,7 @@ import { SkeletonTable } from '../Skeleton.js'
 import { ContextMenu, useContextMenu } from '../ContextMenu.js'
 import { Confirm } from '../Confirm.js'
 import { Thumb } from '../Thumb.js'
-import { groupByProduct, type ProductGroup } from './inventory-groups.js'
+import { groupByProduct, heldUnits, type ProductGroup } from './inventory-groups.js'
 import { SellDialog } from '../Sell.js'
 
 /** The design's column set: selection, thumbnail, then the item's facts. */
@@ -77,9 +77,10 @@ export function Inventory({
 
   useEffect(load, [dataVersion])
 
-  // Sold units belong to Sales. Keeping them here too made inventory a list
+  // Only what is still yours. A sold unit belongs to Sales, and one cancelled
+  // or sent back is not stock at all — listing them here made inventory a list
   // of things you have and things you had, which answers neither question.
-  const all = useMemo(() => (items ?? []).filter((item) => item.status !== 'sold'), [items])
+  const all = useMemo(() => heldUnits(items ?? []), [items])
   const term = query.trim().toLowerCase()
 
   const filtered = useMemo(() => {
