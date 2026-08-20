@@ -39,6 +39,8 @@ let updateTimer: NodeJS.Timeout | null = null
 let lastOfferedVersion: string | null = null
 /** Guards against a scheduled sync starting on top of one already running. */
 let syncInFlight = false
+/** True when a sync was asked for while one was running, and is still owed. */
+let syncAgainWhenDone = false
 
 /**
  * How often to look for new mail.
@@ -172,9 +174,15 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
   skipped?: boolean
 }> {
   if (syncInFlight) {
+    // Someone asked while a sync was already running — a second mailbox added,
+    // or the button pressed twice. The request is remembered rather than
+    // dropped: a mailbox connected mid-sync would otherwise wait for the next
+    // scheduled pass, with nothing on screen to say why.
+    syncAgainWhenDone = true
     return { accounts: 0, fetched: 0, stored: 0, failures: [], skipped: true }
   }
   syncInFlight = true
+  syncAgainWhenDone = false
   log.record('info', 'sync', `${reason} sync started`)
   activity.start('sync', 'Syncing mail', `${reason} sync starting`)
 
@@ -214,6 +222,12 @@ async function runSync(reason: 'manual' | 'scheduled'): Promise<{
     throw error
   } finally {
     syncInFlight = false
+    if (syncAgainWhenDone) {
+      syncAgainWhenDone = false
+      // Detached: the caller of this run is waiting on its own result, not on
+      // a run it never asked for.
+      setTimeout(() => { void runSync('manual').catch(() => {}) }, 100)
+    }
   }
 }
 

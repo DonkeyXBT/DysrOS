@@ -1,39 +1,77 @@
 import { textOf, type ParsedMessage } from '../mail/parsed-message.js'
 import type { ParsedEvent } from '../repos/events.js'
 import type { Parser } from './registry.js'
-import { findDutchAmount } from './nl.js'
+import { parseDutchAmount } from './nl.js'
 
 /**
- * Parsers for PocketGames.nl.
+ * Parsers for PocketGames.
  *
- * PocketGames sells through Shopify, so its mail comes from Shopify's sending
- * domain with PocketGames as the display name, and the order reference is
- * Shopify's `Order #1234` rather than a Dutch `bestelnummer`.
+ * A Shopify shop, and Shopify's mail arrives from a relay address that says
+ * nothing about the shop — `store+67495362819_at_t_shopifyemail_com…@icloud.com`
+ * in the sample here. What identifies it is the display name and the body, so
+ * that is what is matched on: an address like that will change, and the shop's
+ * name in its own mail will not.
  *
- * Ported from a working Python implementation; not yet verified against a
- * `.eml` sample here.
+ * The Dutch storefront states everything in one block: the article with its
+ * quantity, then subtotal, postage, BTW and total. Both languages are read,
+ * since a Shopify shop switches locale with the customer.
  */
 
-const ORDER_CONFIRMED = /Order\s*#\s*([A-Za-z0-9-]+)\s*confirmed/i
-const ORDER_ANY = /Order\s*#\s*([A-Za-z0-9-]+)/i
+const SHOP = /pocketgames/i
 
-const SHOPIFY_SENDERS = ['shopifyemail.com', 'shopify']
+/** `Bestelling #71205 bevestigd`, or Shopify's English `Order #1042`. */
+const ORDER_NUMBER = /(?:bestelling|bestel|order)\s*#\s*([A-Za-z0-9-]{2,12})/i
 
-function senderBlob(message: ParsedMessage): string {
-  return `${message.fromName ?? ''} ${message.fromAddress}`.toLowerCase()
+function bodyOf(message: ParsedMessage): string {
+  return textOf(message, { preferHtml: true })
 }
 
-function isPocketGamesSender(message: ParsedMessage): boolean {
-  const blob = senderBlob(message)
-  if (blob.includes('pocketgames')) return true
-  return SHOPIFY_SENDERS.some((sender) => blob.includes(sender))
+/**
+ * The amount belonging to a label.
+ *
+ * Shopify's own template puts the figure on the line after the label; a
+ * plainer mail puts it on the same line. Both are read, and only the next two
+ * lines are considered so the next label's amount is never mistaken for this
+ * one's.
+ */
+function amountFor(lines: string[], label: RegExp): number | null {
+  const index = lines.findIndex((line) => label.test(line))
+  if (index === -1) return null
+
+  for (const line of lines.slice(index, index + 3)) {
+    const found = /€\s*([\d.,]+)/.exec(line)?.[1]
+    if (found) return parseDutchAmount(found)?.minor ?? null
+  }
+  return null
+}
+
+function isPocketGames(message: ParsedMessage): boolean {
+  return SHOP.test(`${message.fromName ?? ''} ${message.fromAddress}`)
+    || SHOP.test(message.html)
 }
 
 function findOrderNumber(subject: string, body: string): string | null {
-  return ORDER_CONFIRMED.exec(subject)?.[1]
-    ?? ORDER_ANY.exec(subject)?.[1]
-    ?? ORDER_ANY.exec(body)?.[1]
-    ?? null
+  return ORDER_NUMBER.exec(subject)?.[1] ?? ORDER_NUMBER.exec(body)?.[1] ?? null
+}
+
+/**
+ * The article and how many of it.
+ *
+ * Shopify writes `Riftbound Spiritforged Champion Deck Fiora × 2` on the line
+ * after the order summary heading, with the line total beneath it.
+ */
+function findLine(lines: string[]): { title: string | null; quantity: number } {
+  const heading = lines.findIndex((line) => /^(besteloverzicht|order summary)$/i.test(line))
+  const candidate = heading === -1
+    ? lines.find((line) => /\s×\s*\d+$/.test(line))
+    : lines.slice(heading + 1, heading + 4).find((line) => /\s×\s*\d+$/.test(line))
+  if (!candidate) return { title: null, quantity: 1 }
+
+  const match = /^(.*?)\s×\s*(\d+)$/.exec(candidate)
+  return {
+    title: match?.[1]?.trim() ?? candidate,
+    quantity: Math.max(1, Number(match?.[2] ?? 1)),
+  }
 }
 
 export const pocketgamesOrderConfirmation: Parser = {
@@ -41,25 +79,24 @@ export const pocketgamesOrderConfirmation: Parser = {
   retailer: 'pocketgames',
 
   matches(message) {
-    if (!isPocketGamesSender(message)) return false
+    if (!isPocketGames(message)) return false
     const subject = message.subject.toLowerCase()
-
-    if (subject.includes('order #') && subject.includes('confirm')) return true
-    if (ORDER_CONFIRMED.test(message.subject)) return true
-
-    // A bare Shopify sender is not enough — it serves every Shopify store — so
-    // require the display name to name PocketGames as well.
-    return senderBlob(message).includes('pocketgames') && subject.includes('order')
+    if (/verzonden|onderweg|shipped|on its way/.test(subject)) return false
+    return /bevestigd|confirmed/.test(subject)
+      || /bedankt voor je bestelling|thank you for your (?:order|purchase)/i.test(bodyOf(message))
   },
 
   parse(message): ParsedEvent[] {
-    const body = textOf(message, { preferHtml: true })
-    const total = findDutchAmount(
-      /(?:grand\s+)?total[^\n]{0,40}|totaal[^\n]{0,40}/i.exec(body)?.[0] ?? '',
-    )
-    const shipping = findDutchAmount(
-      /(?:shipping|verzend\w*)[^\n]{0,40}/i.exec(body)?.[0] ?? '',
-    )
+    const body = bodyOf(message)
+    const lines = body.split('\n').map((line) => line.trim()).filter(Boolean)
+
+    // Anchored at the start of the line so "Subtotaal" is never read as the
+    // total, and tolerant of the amount following on the same line.
+    const subtotal = amountFor(lines, /^(subtotaal|subtotal)\b/i)
+    const shipping = amountFor(lines, /^(verzending|verzendkosten|shipping)\b/i)
+    const vat = amountFor(lines, /^(btw|tax|vat)\b/i)
+    const total = amountFor(lines, /^(totaal|total)\b/i)
+    const { title, quantity } = findLine(lines)
 
     return [{
       type: 'order_placed',
@@ -67,13 +104,18 @@ export const pocketgamesOrderConfirmation: Parser = {
       externalOrderId: findOrderNumber(message.subject, body),
       occurredAt: message.receivedAt,
       payload: {
+        title,
+        quantity,
         currency: 'EUR',
-        totalMinor: total?.minor ?? null,
-        shippingMinor: shipping?.minor ?? null,
-        quantity: null,
-        unitMinor: null,
-        totalsConsistent: false,
-        source: 'ported-unverified',
+        unitMinor: subtotal === null ? null : Math.round(subtotal / quantity),
+        shippingMinor: shipping,
+        // The shop states the BTW inside the total, which is what this
+        // purchase can reclaim.
+        vatMinor: vat,
+        totalMinor: total,
+        totalsConsistent: subtotal !== null && shipping !== null && total !== null
+          ? subtotal + shipping === total
+          : false,
       },
     }]
   },
@@ -84,13 +126,12 @@ export const pocketgamesShipment: Parser = {
   retailer: 'pocketgames',
 
   matches(message) {
-    if (!isPocketGamesSender(message)) return false
-    const subject = message.subject.toLowerCase()
-    return /shipped|on its way|verzonden|onderweg/.test(subject)
+    if (!isPocketGames(message)) return false
+    return /verzonden|onderweg|shipped|on its way/i.test(message.subject)
   },
 
   parse(message): ParsedEvent[] {
-    const body = textOf(message, { preferHtml: true })
+    const body = bodyOf(message)
     const postnl = /\b(3[SZ][A-Z0-9]{9,24})\b/i.exec(body)?.[1]
     const dhl = /\b(JVGL\d{10,24})\b/i.exec(body)?.[1]
 
@@ -103,7 +144,8 @@ export const pocketgamesShipment: Parser = {
         direction: 'inbound',
         carrier: postnl ? 'postnl' : dhl ? 'dhl' : null,
         trackingNumber: (postnl ?? dhl)?.toUpperCase() ?? null,
-        source: 'ported-unverified',
+        shipmentStatus: (postnl ?? dhl) ? 'in_transit' : 'pending',
+        trackingResolvable: false,
       },
     }]
   },

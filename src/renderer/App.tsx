@@ -158,6 +158,15 @@ export function App() {
     setProgress(null)
     try {
       const result = await api.syncAccounts()
+
+      if (result.skipped) {
+        // A sync was already running — most often the one that starts by
+        // itself the moment a mailbox is connected. Saying "no mailbox
+        // connected" here was both wrong and alarming.
+        notify('info', 'Already syncing · this run will finish on its own')
+        return
+      }
+
       const message = result.failures.length > 0
         ? `${result.failures[0]!.email}: ${result.failures[0]!.error}`
         : result.accounts === 0

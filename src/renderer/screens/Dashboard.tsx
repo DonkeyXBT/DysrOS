@@ -34,15 +34,27 @@ export function Dashboard({
   if (!data) return <SkeletonDashboard />
 
   if (!hasMail) {
+    // A mailbox connected but nothing collected is a different state from no
+    // mailbox at all, and telling someone to connect one they just connected
+    // reads as a failure when the first sync is simply still running.
+    const connected = mailbox !== null
+
     return (
       <div className="empty" style={{ margin: '80px auto' }}>
-        <div className="empty-title">Nothing collected yet</div>
+        <div className="empty-title">
+          {connected ? 'Reading your mail' : 'Nothing collected yet'}
+        </div>
         <div className="empty-body">
-          Connect a mailbox in Settings and this fills itself: orders, parcels and cancellations
-          are read as they arrive.
+          {connected
+            ? `${mailbox} is connected. The first sync reaches back as far as Settings says, and `
+              + 'everything it finds appears here as it arrives.'
+            : 'Connect a mailbox in Settings and this fills itself: orders, parcels and '
+              + 'cancellations are read as they arrive.'}
         </div>
         <div style={{ display: 'flex', gap: 8, marginTop: 14 }}>
-          <button className="btn" onClick={() => onGo('Settings')}>Connect a mailbox</button>
+          {!connected && (
+            <button className="btn" onClick={() => onGo('Settings')}>Connect a mailbox</button>
+          )}
           <button className="btn" onClick={onSync}>Sync now</button>
         </div>
       </div>
