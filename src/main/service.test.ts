@@ -2015,3 +2015,47 @@ describe('a webshop order, its parcel and its refund', () => {
     expect(service.listInventory().every((item) => item.status === 'returned')).toBe(true)
   })
 })
+
+describe.skipIf(!allPresent)('goods that leave again', () => {
+  it('takes a returned unit out of stock and books what it was worth', async () => {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    const unit = service.listInventory()[0]!
+
+    // The return mail states no amount, so the unit's own cost is the refund.
+    const path = join(mkdtempSync(join(tmpdir(), 'resell-ops-eml-')), 'return.eml')
+    writeFileSync(path, readFileSync(fixturePath('2026-05-06-Je-retour-is-verwerkt.eml'), 'utf8')
+      .replace(/C00031J95X/g, unit.orderRef ?? '')
+      .replace(/VTech - Toet Toet Auto&#x27;s - Garage/g, unit.title))
+    const result = await service.importEml(path)
+    expect(result.parserId).toBe('bol-return-processed')
+
+    const after = service.listInventory().find((item) => item.id === unit.id)!
+    expect(after.status).toBe('returned')
+
+    const purchase = service.listPurchases().find((row) => row.reference === unit.orderRef)!
+    expect(purchase.refundOutstanding).toBe(unit.cost)
+  })
+
+  it('settles the parcel when it is collected from a pickup point', async () => {
+    await service.importEml(fixturePath('Bedankt voor je bestelling.eml'))
+    const order = service.listPurchases().find((row) => row.kind === 'buy')!
+
+    // The shipping mail and the order have to be the same order for one to
+    // settle the other; the fixtures are of different ones.
+    const shipped = join(mkdtempSync(join(tmpdir(), 'resell-ops-eml-')), 'shipped.eml')
+    writeFileSync(shipped, readFileSync(fixturePath('Je pakket is nu bij DHL.eml'), 'utf8')
+      .replace(/C000D3NXM9/g, order.reference ?? ''))
+    await service.importEml(shipped)
+    expect(service.listShipments()[0]!.status).not.toBe('delivered')
+
+    const path = join(mkdtempSync(join(tmpdir(), 'resell-ops-eml-')), 'collected.eml')
+    writeFileSync(path, readFileSync(fixturePath('2026-07-04-Je-hebt-je-pakket-opgehaald.eml'), 'utf8')
+      .replace(/C0008N3L41/g, order.reference ?? ''))
+    const result = await service.importEml(path)
+    expect(result.parserId).toBe('bol-collected')
+
+    // Collected is delivered: the goods are in hand and the parcel is done.
+    expect(service.listInventory().every((item) => item.status === 'in_stock')).toBe(true)
+    expect(service.listShipments().every((parcel) => parcel.status === 'delivered')).toBe(true)
+  })
+})

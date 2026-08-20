@@ -293,10 +293,35 @@ export class Reconciler {
     // amount is not stated in a cancellation mail. Hold it for the next run.
     if (!purchaseId) return false
 
-    this.db.prepare("UPDATE purchases SET status = 'cancelled' WHERE id = ?").run(purchaseId)
+    const payload = event.payload as Record<string, unknown>
+    const cancelled = Math.max(1, Number(payload.quantity ?? 1))
+    const title = (payload.title as string | null) ?? null
+
+    // A cancellation names an article and how many of it, not the whole order.
+    // Cancelling everything would wipe out the units still coming — an order
+    // of three where one was cancelled is still an order of two.
+    const doomed = this.db.prepare(
+      `SELECT id FROM items
+       WHERE purchase_id = ?
+         AND status NOT IN ('sold', 'delivered', 'returned', 'cancelled')
+         AND (? IS NULL OR lower(trim(title)) = lower(trim(?)))
+       ORDER BY id
+       LIMIT ?`,
+    ).all(purchaseId, title, title, cancelled) as { id: string }[]
+
+    for (const item of doomed) {
+      this.db.prepare("UPDATE items SET status = 'cancelled' WHERE id = ?").run(item.id)
+    }
+
+    // The order itself is only cancelled when nothing of it is left standing.
+    const standing = (this.db.prepare(
+      `SELECT COUNT(*) AS n FROM items
+       WHERE purchase_id = ? AND status NOT IN ('cancelled', 'returned')`,
+    ).get(purchaseId) as { n: number }).n
+
     this.db.prepare(
-      "UPDATE items SET status = 'cancelled' WHERE purchase_id = ? AND status NOT IN ('sold','delivered','returned')",
-    ).run(purchaseId)
+      `UPDATE purchases SET status = ? WHERE id = ?`,
+    ).run(standing === 0 ? 'cancelled' : 'partly_cancelled', purchaseId)
 
     if (event.payload.refundExpected) {
       const purchase = this.db
@@ -405,7 +430,27 @@ export class Reconciler {
     // may still arrive.
     if (!purchaseId) return false
 
-    const amount = Number(payload.amountMinor ?? payload.totalMinor ?? 0)
+    const returned = Math.max(1, Number(payload.quantity ?? 1))
+    const title = (payload.title as string | null) ?? null
+
+    // The mail names an article and how many of it. A return of one unit from
+    // an order of three sends back one unit.
+    const going = this.db.prepare(
+      `SELECT id, cost_minor FROM items
+       WHERE purchase_id = ?
+         AND status NOT IN ('sold', 'cancelled', 'returned')
+         AND (? IS NULL OR lower(trim(title)) = lower(trim(?)))
+       ORDER BY id
+       LIMIT ?`,
+    ).all(purchaseId, title, title, returned) as { id: string; cost_minor: number }[]
+
+    // bol states no amount in a return mail — the money follows within days —
+    // so the refund is worth what the returned units cost, which the order
+    // already recorded.
+    const stated = payload.amountMinor ?? payload.totalMinor
+    const amount = stated === null || stated === undefined
+      ? going.reduce((total, item) => total + item.cost_minor, 0)
+      : Number(stated)
     this.db.prepare(
       `INSERT INTO refunds (id, purchase_id, currency, amount_minor, received_at, expected_at, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -422,13 +467,19 @@ export class Reconciler {
       now,
     )
 
+    for (const item of going) {
+      this.db.prepare("UPDATE items SET status = 'returned' WHERE id = ?").run(item.id)
+    }
+
+    // The order is only refunded outright when nothing of it is left standing.
+    const standing = (this.db.prepare(
+      `SELECT COUNT(*) AS n FROM items
+       WHERE purchase_id = ? AND status NOT IN ('cancelled', 'returned')`,
+    ).get(purchaseId) as { n: number }).n
+
     this.db.prepare(
-      "UPDATE purchases SET status = 'refunded' WHERE id = ? AND status != 'cancelled'",
-    ).run(purchaseId)
-    this.db.prepare(
-      `UPDATE items SET status = 'returned'
-       WHERE purchase_id = ? AND status IN ('incoming', 'in_stock', 'listed')`,
-    ).run(purchaseId)
+      'UPDATE purchases SET status = ? WHERE id = ? AND status != ?',
+    ).run(standing === 0 ? 'refunded' : 'partly_refunded', purchaseId, 'cancelled')
 
     return true
   }
