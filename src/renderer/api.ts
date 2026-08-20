@@ -240,6 +240,8 @@ interface Api {
   syncAccounts(): Promise<{
     accounts: number; fetched: number; stored: number
     failures: { email: string; error: string }[]
+    /** True when a mailbox still had mail waiting, which a follow-up run collects. */
+    remaining?: boolean
     /** True when a sync was already running, so this request did nothing. */
     skipped?: boolean
   }>

@@ -104,6 +104,32 @@ export function defaultFolderFor(provider: string): string {
 }
 
 /**
+ * Runs a job for every item, a few at a time.
+ *
+ * Mailboxes are read side by side rather than one after another. Reading a
+ * busy mailbox is minutes of waiting on a server, and done in turn that wait is
+ * paid again for every account: the last mailbox in the list would be read long
+ * after the person had given up watching, which looks exactly like not being
+ * read at all. The limit keeps a dozen accounts from opening a dozen
+ * connections at once.
+ */
+export async function inParallel<T>(
+  items: readonly T[],
+  limit: number,
+  job: (item: T) => Promise<void>,
+): Promise<void> {
+  let next = 0
+  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
+    for (;;) {
+      const index = next++
+      if (index >= items.length) return
+      await job(items[index]!)
+    }
+  })
+  await Promise.all(workers)
+}
+
+/**
  * Everything the renderer can ask for, in one place.
  *
  * The renderer never touches the database, the filesystem or the network: it
@@ -865,24 +891,35 @@ export class AppService {
     fetched: number
     stored: number
     failures: { email: string; error: string }[]
-    perAccount: { email: string; folder: string; fetched: number; stored: number; startedFresh: boolean }[]
+    perAccount: {
+      email: string; folder: string; fetched: number; stored: number
+      startedFresh: boolean; remaining: boolean
+    }[]
+    /** True when at least one mailbox still had mail waiting when the run ended. */
+    remaining: boolean
   }> {
     const enabled = this.accounts.list().filter((account) => account.enabled)
     let fetched = 0
     let stored = 0
+    let remaining = false
     const failures: { email: string; error: string }[] = []
     const perAccount: {
-      email: string; folder: string; fetched: number; stored: number; startedFresh: boolean
+      email: string; folder: string; fetched: number; stored: number
+      startedFresh: boolean; remaining: boolean
     }[] = []
 
     let handled = 0
     let storedSoFar = 0
 
-    for (const account of enabled) {
+    await inParallel(enabled, 3, async (account) => {
       const password = this.accounts.password(account.id)
       if (password === null) {
-        failures.push({ email: account.email, error: 'Stored password could not be read.' })
-        continue
+        const message = 'The stored password could not be read. Enter it again in Settings.'
+        // Recorded on the account, not only in this run's answer: an account
+        // skipped silently looks like one that synced and found nothing.
+        this.accounts.recordSyncFailure(account.id, message)
+        failures.push({ email: account.email, error: message })
+        return
       }
 
       const client = new ImapFlowClient({
@@ -900,29 +937,35 @@ export class AppService {
           box,
           client,
           async ({ accountId, folder: f, uid, raw }) => {
-            const isNew = await this.ingestRaw(accountId, f, uid, raw)
+            const read = await this.ingestRaw(accountId, f, uid, raw)
             // Reported per message rather than per account: a mailbox can take
             // minutes, and a progress bar that only moves at the end is no
-            // better than none.
+            // better than none. The subject comes back from the ingest rather
+            // than being looked up again — hashing every message twice to
+            // caption a progress line is a real cost on a large mailbox.
             handled += 1
             onProgress?.({
               account: account.email,
               done: handled,
-              stored: isNew ? (storedSoFar += 1) : storedSoFar,
-              subject: this.messages.findByHash(hashContent(raw.toString('utf8')))?.subject ?? '',
+              stored: read.isNew ? (storedSoFar += 1) : storedSoFar,
+              subject: read.subject,
             })
-            return isNew
+            return read.isNew
           },
-          { limit: 500, initialLookbackDays: this.syncLookbackDays() },
+          // Enough that a month of a busy mailbox is read in one run rather
+          // than a slice of it, and asked for in batches so the cursor keeps up.
+          { limit: 5000, batchSize: 200, initialLookbackDays: this.syncLookbackDays() },
         )
         fetched += result.fetched
         stored += result.stored
+        if (result.remaining) remaining = true
         perAccount.push({
           email: account.email,
           folder: box,
           fetched: result.fetched,
           stored: result.stored,
           startedFresh: result.startedFresh,
+          remaining: result.remaining,
         })
         this.accounts.recordSyncSuccess(account.id, new Date().toISOString())
       } catch (error) {
@@ -930,19 +973,19 @@ export class AppService {
         this.accounts.recordSyncFailure(account.id, message)
         failures.push({ email: account.email, error: message })
       }
-    }
+    })
 
     this.reconciler.run(new Date().toISOString())
-    return { accounts: enabled.length, fetched, stored, failures, perAccount }
+    return { accounts: enabled.length, fetched, stored, failures, perAccount, remaining }
   }
 
-  /** Stores and parses one fetched message. Returns true when it was new. */
+  /** Stores and parses one fetched message, and says whether it was new. */
   private async ingestRaw(
     accountId: string,
     folder: string,
     uid: number,
     raw: Buffer,
-  ): Promise<boolean> {
+  ): Promise<{ isNew: boolean; subject: string }> {
     const parsed = await loadEml(raw)
     const now = new Date().toISOString()
     const contentHash = hashContent(raw.toString('utf8'))
@@ -966,16 +1009,17 @@ export class AppService {
       rawPath,
       bodyPreview: textOf(parsed, { preferHtml: true }).slice(0, 400),
     })
-    if (already) return false
+    const subject = stored.subject
+    if (already) return { isNew: false, subject }
 
     const result = this.registry.parse(parsed)
     if (!result) {
       this.messages.markUnrecognized(stored.id)
-      return true
+      return { isNew: true, subject }
     }
     this.events.replaceForMessage(stored.id, result.parserId, result.events, now)
     this.messages.markParsed(stored.id, result.parserId, now)
-    return true
+    return { isNew: true, subject }
   }
 
   /**

@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { AppService } from './service.js'
+import { AppService, inParallel } from './service.js'
 import type { CompletedTask, MailTask } from '../core/aycd/client.js'
 import type { NotificationInput, sendToDiscord } from '../core/notify/discord.js'
 import type { Fetcher } from '../core/tracking/dhl-status.js'
@@ -2108,5 +2108,44 @@ describe('an app password pasted the way it is shown', () => {
     })
 
     expect(attempted).toContain('correct horse battery staple')
+  })
+})
+
+describe('syncing several mailboxes', () => {
+  it('runs mailboxes side by side rather than one after another', async () => {
+    let running = 0
+    let mostAtOnce = 0
+    const order: string[] = []
+
+    await inParallel(['a', 'b', 'c', 'd'], 3, async (name) => {
+      running += 1
+      mostAtOnce = Math.max(mostAtOnce, running)
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      order.push(name)
+      running -= 1
+    })
+
+    expect(order.sort()).toEqual(['a', 'b', 'c', 'd'])
+    expect(mostAtOnce).toBe(3)
+  })
+
+  it('says which mailbox was skipped instead of leaving it looking untouched', async () => {
+    const unreadable = new AppService(':memory:', {
+      encrypt: (p) => 'enc:' + Buffer.from(p, 'utf8').toString('base64'),
+      decrypt: () => {
+        throw new Error('the keystore refused')
+      },
+    })
+    unreadable.addAccount({
+      label: 'iCloud', email: 'someone@icloud.com', provider: 'icloud',
+      host: 'imap.mail.me.com', port: 993, useTls: true,
+      username: 'someone@icloud.com', password: 'abcd efgh ijkl mnop',
+    })
+
+    const result = await unreadable.syncAccounts()
+
+    expect(result.failures).toHaveLength(1)
+    // And recorded on the account itself, so Settings shows it afterwards.
+    expect(unreadable.listAccounts()[0]!.lastError).toMatch(/password could not be read/i)
   })
 })
