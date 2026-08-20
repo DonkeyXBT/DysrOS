@@ -1243,6 +1243,11 @@ describe.skipIf(!allPresent)('the courier window reaches the parcel it belongs t
 describe.skipIf(!allPresent)('telling Discord what happened', () => {
   const WEBHOOK = 'https://discord.com/api/webhooks/123456789012345678/abcdefghijklmnopqrstuvwxyz'
 
+  // The fixtures have fixed dates, and only recent events are announced. A
+  // fixed clock keeps these tests about notifications rather than about how
+  // long ago the fixtures were captured.
+  const JUST_AFTER = Date.parse('2026-08-19T20:00:00.000Z')
+
   /** Stands in for Discord, and records exactly what it was asked to post. */
   function recorder() {
     const batches: { url: string; inputs: NotificationInput[] }[] = []
@@ -1262,7 +1267,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     await importAll()
 
     const { batches, send } = recorder()
-    const result = await service.flushNotifications({ send })
+    const result = await service.flushNotifications({ send, now: JUST_AFTER })
 
     expect(result.sent).toBeGreaterThan(0)
     expect(batches.length).toBeGreaterThan(0)
@@ -1276,18 +1281,18 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     await importAll()
 
     const first = recorder()
-    const sent = await service.flushNotifications({ send: first.send })
+    const sent = await service.flushNotifications({ send: first.send, now: JUST_AFTER })
     expect(sent.sent).toBeGreaterThan(0)
 
     const second = recorder()
-    expect(await service.flushNotifications({ send: second.send }))
+    expect(await service.flushNotifications({ send: second.send, now: JUST_AFTER }))
       .toMatchObject({ sent: 0 })
     expect(second.batches).toEqual([])
 
     // Re-reading every stored message must not announce the past all over again.
     await service.reparseAll()
     const third = recorder()
-    expect(await service.flushNotifications({ send: third.send })).toMatchObject({ sent: 0 })
+    expect(await service.flushNotifications({ send: third.send, now: JUST_AFTER })).toMatchObject({ sent: 0 })
   })
 
   it('says a parcel is out for delivery rather than merely shipped', async () => {
@@ -1295,7 +1300,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     await service.importEml(fixturePath('De_bezorger_is_onderweg_0.eml'))
 
     const { batches, send } = recorder()
-    await service.flushNotifications({ send })
+    await service.flushNotifications({ send, now: JUST_AFTER })
 
     const inputs = batches.flatMap((batch) => batch.inputs)
     expect(inputs.some((input) => input.status === 'Out for delivery')).toBe(true)
@@ -1305,13 +1310,13 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     await importAll()
 
     const { batches, send } = recorder()
-    expect(await service.flushNotifications({ send })).toMatchObject({ sent: 0 })
+    expect(await service.flushNotifications({ send, now: JUST_AFTER })).toMatchObject({ sent: 0 })
     expect(batches).toEqual([])
 
     // Connecting a webhook afterwards must not announce last month at once.
     service.setDiscordWebhook(WEBHOOK)
     const later = recorder()
-    expect(await service.flushNotifications({ send: later.send })).toMatchObject({ sent: 0 })
+    expect(await service.flushNotifications({ send: later.send, now: JUST_AFTER })).toMatchObject({ sent: 0 })
   })
 
   it('obeys the rules: an event switched off is not sent', async () => {
@@ -1322,7 +1327,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     await importAll()
 
     const { batches, send } = recorder()
-    const result = await service.flushNotifications({ send })
+    const result = await service.flushNotifications({ send, now: JUST_AFTER })
     expect(batches).toEqual([])
     expect(result.sent).toBe(0)
     expect(result.skipped).toBeGreaterThan(0)
@@ -1334,12 +1339,12 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
 
     const failing: typeof sendToDiscord = async () =>
       ({ ok: false, message: 'Discord rate limited this webhook.' })
-    const result = await service.flushNotifications({ send: failing })
+    const result = await service.flushNotifications({ send: failing, now: JUST_AFTER })
     expect(result.failed).toBeGreaterThan(0)
     expect(result.sent).toBe(0)
 
     const { batches, send } = recorder()
-    const retry = await service.flushNotifications({ send })
+    const retry = await service.flushNotifications({ send, now: JUST_AFTER })
     expect(retry.sent).toBeGreaterThan(0)
     expect(batches.length).toBeGreaterThan(0)
   })
@@ -1353,7 +1358,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     expect(service.pendingNotifications(100, later)).toEqual([])
 
     const { batches, send } = recorder()
-    expect(await service.flushNotifications({ send })).toMatchObject({ sent: 0 })
+    expect(await service.flushNotifications({ send, now: JUST_AFTER })).toMatchObject({ sent: 0 })
     expect(batches).toEqual([])
   })
 
@@ -1364,7 +1369,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     await importAll()
 
     const { batches, send } = recorder()
-    const result = await service.flushNotifications({ send })
+    const result = await service.flushNotifications({ send, now: JUST_AFTER })
     expect(batches).toEqual([])
     expect(result.failed).toBeGreaterThan(0)
     expect(result.sent).toBe(0)
@@ -1372,7 +1377,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     // Once it is readable again, they go out.
     service.setDiscordWebhook(WEBHOOK)
     const retry = recorder()
-    expect((await service.flushNotifications({ send: retry.send })).sent).toBeGreaterThan(0)
+    expect((await service.flushNotifications({ send: retry.send, now: JUST_AFTER })).sent).toBeGreaterThan(0)
   })
 
   it('announces one arrival once, however many mails report it', async () => {
@@ -1390,7 +1395,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     await service.importEml(fixturePath('Je_pakket_is_bezorgd_dhl.eml'))
 
     const { batches, send } = recorder()
-    await service.flushNotifications({ send })
+    await service.flushNotifications({ send, now: JUST_AFTER })
 
     const delivered = batches
       .flatMap((batch) => batch.inputs)
@@ -1413,7 +1418,7 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
 
     await service.importEml(fixturePath('Je_pakket_is_bezorgd_dhl.eml'))
     const { batches, send } = recorder()
-    await service.flushNotifications({ send })
+    await service.flushNotifications({ send, now: JUST_AFTER })
 
     const delivered = batches
       .flatMap((batch) => batch.inputs)
@@ -1430,10 +1435,10 @@ describe.skipIf(!allPresent)('telling Discord what happened', () => {
     service.setDiscordWebhook(WEBHOOK)
     await importAll()
     // Enough events to need more than one message.
-    expect(service.pendingNotifications(100).length).toBeGreaterThan(0)
+    expect(service.pendingNotifications(100, JUST_AFTER).length).toBeGreaterThan(0)
 
     const { batches, send } = recorder()
-    await service.flushNotifications({ send, limit: 100 })
+    await service.flushNotifications({ send, limit: 100, now: JUST_AFTER })
     expect(batches.every((batch) => batch.inputs.length <= 10)).toBe(true)
   })
 })
@@ -2057,5 +2062,51 @@ describe.skipIf(!allPresent)('goods that leave again', () => {
     // Collected is delivered: the goods are in hand and the parcel is done.
     expect(service.listInventory().every((item) => item.status === 'in_stock')).toBe(true)
     expect(service.listShipments().every((parcel) => parcel.status === 'delivered')).toBe(true)
+  })
+})
+
+describe('an app password pasted the way it is shown', () => {
+  it('connects with the spaces Google puts in it', async () => {
+    // Nothing reaches the network here: the test is that the password the
+    // connection is attempted with is the one without the spacing.
+    const attempted: string[] = []
+    const service2 = new AppService(':memory:', {
+      encrypt: (p) => { attempted.push(p); return p },
+      decrypt: (c) => c,
+    })
+
+    service2.addAccount({
+      label: 'Gmail',
+      email: 'someone@gmail.com',
+      provider: 'gmail',
+      host: 'imap.gmail.com',
+      port: 993,
+      useTls: true,
+      username: 'someone@gmail.com',
+      password: 'abcd efgh ijkl mnop',
+    })
+
+    expect(attempted).toContain('abcdefghijklmnop')
+  })
+
+  it('leaves a password that is not one of those alone', () => {
+    const attempted: string[] = []
+    const service2 = new AppService(':memory:', {
+      encrypt: (p) => { attempted.push(p); return p },
+      decrypt: (c) => c,
+    })
+
+    service2.addAccount({
+      label: 'Custom',
+      email: 'someone@example.com',
+      provider: 'custom',
+      host: 'mail.example.com',
+      port: 993,
+      useTls: true,
+      username: 'someone@example.com',
+      password: 'correct horse battery staple',
+    })
+
+    expect(attempted).toContain('correct horse battery staple')
   })
 })

@@ -256,11 +256,9 @@ export function Purchases({ query, dataVersion }: { query: string; dataVersion: 
                       totals disagree
                     </span>
                   )}
-                  {row.refundOutstanding && (
-                    <span className="mono" style={{ fontSize: 11, color: 'var(--pink)' }}>
-                      {row.refundOutstanding} refund due
-                    </span>
-                  )}
+                  {/* A cancelled order is refunded — that is what cancelling
+                      means — so saying so on the row adds nothing the status
+                      does not already say. */}
                 </div>
               </div>
             )

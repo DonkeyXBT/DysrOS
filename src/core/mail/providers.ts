@@ -28,7 +28,7 @@ export const PROVIDERS: readonly ProviderPreset[] = [
     useTls: true,
     requiresAppPassword: true,
     setupNote:
-      'Gmail rejects your normal password over IMAP. Turn on 2-step verification, then create an App password and paste that here.',
+      'Gmail rejects your normal password over IMAP. Turn on 2-step verification, then create an App password and paste it here — spaces and all, they are taken out for you.',
     domains: ['gmail.com', 'googlemail.com'],
   },
   {
@@ -50,7 +50,7 @@ export const PROVIDERS: readonly ProviderPreset[] = [
     useTls: true,
     requiresAppPassword: true,
     setupNote:
-      'Yahoo rejects your normal password over IMAP. Generate an App password in Account Security and paste that here.',
+      'Yahoo rejects your normal password over IMAP. Generate an App password in Account Security and paste it here as shown.',
     domains: ['yahoo.com', 'yahoo.co.uk', 'yahoo.nl', 'ymail.com'],
   },
   {
@@ -72,7 +72,7 @@ export const PROVIDERS: readonly ProviderPreset[] = [
     useTls: true,
     requiresAppPassword: true,
     setupNote:
-      'iCloud requires an app-specific password generated from your Apple Account security settings.',
+      'iCloud requires an app-specific password from your Apple Account security settings. Paste it as shown; the dashes are taken out for you.',
     domains: ['icloud.com', 'me.com', 'mac.com'],
   },
   {

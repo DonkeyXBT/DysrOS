@@ -33,6 +33,7 @@ import {
   fetchShipment, summarizeShipment, toShipmentStatus, type Fetcher,
 } from '../core/tracking/dhl-status.js'
 import { breakDownSale, vatWithinCost, NL_VAT_BASIS_POINTS } from '../core/sell.js'
+import { normaliseAppPassword } from '../core/mail/app-password.js'
 import { toNotification } from '../core/notify/from-events.js'
 import { findParcel, foldShipment, furthestStatus, mergeInto } from '../core/reconcile/shipment-merge.js'
 import {
@@ -830,7 +831,13 @@ export class AppService {
   }
 
   addAccount(account: NewAccount): MailAccount {
-    return this.accounts.add(account, new Date().toISOString())
+    // Google and Apple show app passwords in groups; people paste what they
+    // see. Putting that right here means it is right for the connection test
+    // and for every sync afterwards.
+    return this.accounts.add(
+      { ...account, password: normaliseAppPassword(account.password) },
+      new Date().toISOString(),
+    )
   }
 
   removeAccount(id: string): void {
@@ -840,7 +847,10 @@ export class AppService {
   async testAccount(connection: {
     host: string; port: number; useTls: boolean; username: string; password: string
   }) {
-    return testConnection(connection)
+    return testConnection({
+      ...connection,
+      password: normaliseAppPassword(connection.password),
+    })
   }
 
   /**
@@ -1353,9 +1363,15 @@ export class AppService {
    * every parcel of the past month at once.
    */
   async flushNotifications(
-    options: { send?: typeof sendToDiscord; limit?: number } = {},
+    options: {
+      send?: typeof sendToDiscord
+      limit?: number
+      /** Injected by tests, so what counts as news does not depend on the day
+       *  they are run. */
+      now?: number
+    } = {},
   ): Promise<{ sent: number; skipped: number; failed: number }> {
-    const pending = this.pendingNotifications(options.limit ?? 50)
+    const pending = this.pendingNotifications(options.limit ?? 50, options.now ?? Date.now())
     if (pending.length === 0) return { sent: 0, skipped: 0, failed: 0 }
 
     const url = this.discordWebhook()
