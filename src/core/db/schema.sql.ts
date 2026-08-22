@@ -430,3 +430,23 @@ ALTER TABLE shipments ADD COLUMN label_message_id TEXT;
 export const SCHEMA_V13 = `
 ALTER TABLE messages ADD COLUMN to_address TEXT;
 `
+
+/**
+ * Statuses set by hand.
+ *
+ * The mail is the authority on where something is, right up until it is wrong:
+ * a parcel handed over at the door with no delivery mail behind it, a unit
+ * listed somewhere this application never sees. Correcting it has to survive
+ * the next sync, and reconciliation rewrites status from events every run — so
+ * the correction cannot live on the row it corrects. Kept beside the thing, by
+ * id, and re-applied after every run.
+ */
+export const SCHEMA_V14 = `
+CREATE TABLE status_overrides (
+  kind      TEXT NOT NULL,
+  entity_id TEXT NOT NULL,
+  status    TEXT NOT NULL,
+  set_at    TEXT NOT NULL,
+  PRIMARY KEY (kind, entity_id)
+);
+`

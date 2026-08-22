@@ -261,6 +261,12 @@ interface Api {
     kind: 'item' | 'purchase' | 'shipment' | 'sale',
     id: string,
   ): Promise<{ deleted: boolean }>
+  /** Sets a status by hand. It survives the next sync; the mail no longer moves it. */
+  setStatus(kind: 'item' | 'shipment', ids: string[], status: string): Promise<number>
+  /** Hands a status back to the mail, leaving it where it is until the next notice. */
+  clearStatusOverride(kind: 'item' | 'shipment', ids: string[]): Promise<number>
+  /** The rows whose status was set by hand. */
+  statusOverrides(kind: 'item' | 'shipment'): Promise<string[]>
   discordSettings(): Promise<DiscordSettingsView>
   discordSetWebhook(url: string): Promise<{ ok: boolean; message: string }>
   discordSetRule(event: string, enabled: boolean): Promise<boolean>

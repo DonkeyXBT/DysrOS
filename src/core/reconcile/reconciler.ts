@@ -48,7 +48,29 @@ export class Reconciler {
       }
     }
 
+    this.applyStatusOverrides()
     return { applied, held }
+  }
+
+  /**
+   * Statuses set by hand, re-applied after everything the mail said.
+   *
+   * Last rather than first: an override is a correction of what the mail
+   * concluded, so it has to be written after the conclusion, every run, or the
+   * next delivery notice quietly undoes it.
+   */
+  private applyStatusOverrides(): void {
+    const overrides = this.db
+      .prepare('SELECT kind, entity_id, status FROM status_overrides')
+      .all() as { kind: string; entity_id: string; status: string }[]
+
+    for (const override of overrides) {
+      const table = override.kind === 'item' ? 'items' : override.kind === 'shipment' ? 'shipments' : null
+      if (!table) continue
+      this.db
+        .prepare(`UPDATE ${table} SET status = ? WHERE id = ? AND status != ?`)
+        .run(override.status, override.entity_id, override.status)
+    }
   }
 
   /** Returns false when the event cannot be applied yet and should be retried. */

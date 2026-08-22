@@ -129,6 +129,20 @@ export async function inParallel<T>(
   await Promise.all(workers)
 }
 
+/**
+ * The statuses a unit can be moved to by hand.
+ *
+ * Where the goods are, and nothing else. `sold` is absent deliberately: a sale
+ * carries a price, a buyer and a date, and none of them can be inferred from a
+ * status. Selling stays with the sell dialog, which asks.
+ */
+export const MANUAL_ITEM_STATUSES = ['incoming', 'in_stock', 'listed', 'cancelled', 'returned']
+
+/** The statuses a parcel can be moved to by hand — the carrier's own vocabulary. */
+export const MANUAL_SHIPMENT_STATUSES = [
+  'pending', 'in_transit', 'out_for_delivery', 'ready_for_pickup', 'delivered', 'exception',
+]
+
 /** The date of a mail with no envelope: the one in its filename, or the file's own. */
 function dateFile(message: ParsedMessage, path: string): ParsedMessage {
   // A body saved out of a mail client carries no Date header, and a mail dated
@@ -1216,6 +1230,79 @@ export class AppService {
    * later re-parse does not quietly bring back something deliberately removed —
    * which would make manual deletion feel broken rather than final.
    */
+  /**
+   * Sets a status by hand, and makes it stick.
+   *
+   * The mail is the authority until it is wrong — a parcel handed over at the
+   * door with no delivery notice behind it, a unit listed somewhere this
+   * application never sees. The correction is recorded beside the row rather
+   * than on it, because reconciliation rewrites status from events on every
+   * run and would otherwise undo it within the hour.
+   *
+   * Selling is not on the list. A sale has a price, a buyer and a date behind
+   * it, and a status alone cannot say any of them.
+   */
+  setStatus(kind: 'item' | 'shipment', ids: readonly string[], status: string): number {
+    const allowed = kind === 'item' ? MANUAL_ITEM_STATUSES : MANUAL_SHIPMENT_STATUSES
+    if (!allowed.includes(status)) {
+      throw new Error(`${status} is not a status a ${kind} can be set to.`)
+    }
+
+    const table = kind === 'item' ? 'items' : 'shipments'
+    const now = new Date().toISOString()
+    let changed = 0
+
+    const write = this.db.transaction(() => {
+      for (const id of ids) {
+        const row = this.db
+          .prepare(`SELECT status FROM ${table} WHERE id = ?`)
+          .get(id) as { status: string } | undefined
+        if (!row) continue
+        // A sold unit has a sale behind it; putting it back is its own action,
+        // which removes the sale rather than orphaning it.
+        if (kind === 'item' && row.status === 'sold') continue
+
+        this.db.prepare(`UPDATE ${table} SET status = ? WHERE id = ?`).run(status, id)
+        this.db.prepare(
+          `INSERT INTO status_overrides (kind, entity_id, status, set_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(kind, entity_id) DO UPDATE SET
+             status = excluded.status,
+             set_at = excluded.set_at`,
+        ).run(kind, id, status, now)
+        changed += 1
+      }
+    })
+    write()
+    return changed
+  }
+
+  /**
+   * Hands a status back to the mail.
+   *
+   * What is on screen stays where it is — nothing here can know what the mail
+   * would have concluded — but the next notice about it moves it again.
+   */
+  clearStatusOverride(kind: 'item' | 'shipment', ids: readonly string[]): number {
+    let cleared = 0
+    const remove = this.db.transaction(() => {
+      for (const id of ids) {
+        cleared += this.db
+          .prepare('DELETE FROM status_overrides WHERE kind = ? AND entity_id = ?')
+          .run(kind, id).changes
+      }
+    })
+    remove()
+    return cleared
+  }
+
+  /** The rows whose status was set by hand, so the screens can say so. */
+  statusOverrides(kind: 'item' | 'shipment'): string[] {
+    return (this.db
+      .prepare('SELECT entity_id FROM status_overrides WHERE kind = ?')
+      .all(kind) as { entity_id: string }[]).map((row) => row.entity_id)
+  }
+
   deleteRecord(kind: 'item' | 'purchase' | 'shipment' | 'sale', id: string): { deleted: boolean } {
     const remove = this.db.transaction(() => {
       if (kind === 'item') {
