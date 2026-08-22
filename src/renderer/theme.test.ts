@@ -59,6 +59,7 @@ describe('the stylesheet', () => {
       'titlebar', 'titlebar-search', 'sidebar', 'nav-item', 'account-chip',
       'activity-button', 'activity-panel', 'rail-toggle', 'thumb', 'track-link',
       'settings-grid', 'modal', 'toast', 'ctx-menu', 'table', 'trow', 'thead',
+      'chip-menu',
     ]) {
       expect(stylesheet, `.${name} is not styled`).toMatch(new RegExp(`\\.${name}\\b`))
     }

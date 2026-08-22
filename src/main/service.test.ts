@@ -2169,3 +2169,67 @@ describe('a cancelled PocketGames order', () => {
     expect(purchase?.status).toBe('cancelled')
   })
 })
+
+describe.skipIf(!allPresent)('a status set by hand', () => {
+  async function importAll() {
+    for (const name of FIXTURES) await service.importEml(fixturePath(name))
+  }
+
+  it('survives the mail being read again', async () => {
+    await importAll()
+    const unit = service.listInventory()[0]!
+
+    expect(service.setStatus('item', [unit.id], 'listed')).toBe(1)
+    expect(service.listInventory().find((i) => i.id === unit.id)?.status).toBe('listed')
+
+    // The strongest test there is: every mail re-parsed and every entity
+    // rebuilt from it, which is what a parser fix does.
+    await service.reparseAll()
+
+    expect(service.listInventory().find((i) => i.id === unit.id)?.status).toBe('listed')
+    expect(service.statusOverrides('item')).toContain(unit.id)
+  })
+
+  it('hands the status back to the mail when asked', async () => {
+    await importAll()
+    const unit = service.listInventory()[0]!
+    service.setStatus('item', [unit.id], 'listed')
+
+    expect(service.clearStatusOverride('item', [unit.id])).toBe(1)
+    expect(service.statusOverrides('item')).toEqual([])
+
+    // Where it stands is left alone — nothing here knows what the mail would
+    // have concluded — but nothing pins it any more either.
+    expect(service.listInventory().find((i) => i.id === unit.id)?.status).toBe('listed')
+  })
+
+  it('moves a parcel back as readily as forward', async () => {
+    await importAll()
+    const parcel = service.listShipments()[0]!
+
+    service.setStatus('shipment', [parcel.id], 'delivered')
+    expect(service.listShipments().find((s) => s.id === parcel.id)?.status).toBe('delivered')
+
+    // Reconciliation only ever moves a parcel forward. A correction is not
+    // reconciliation, and has to be able to say "no, it is not here yet".
+    service.setStatus('shipment', [parcel.id], 'in_transit')
+    await service.reparseAll()
+    expect(service.listShipments().find((s) => s.id === parcel.id)?.status).toBe('in_transit')
+  })
+
+  it('refuses a status that means something it cannot know', async () => {
+    await importAll()
+    const unit = service.listInventory()[0]!
+
+    // Selling carries a price, a buyer and a date. A status says none of them.
+    expect(() => service.setStatus('item', [unit.id], 'sold')).toThrow(/not a status/i)
+  })
+
+  it('leaves a sold unit to the sale that owns it', async () => {
+    await importAll()
+    const unit = service.listInventory()[0]!
+    service.sellItems([unit.id], { amountMinor: 5000, includesVat: true })
+
+    expect(service.setStatus('item', [unit.id], 'in_stock')).toBe(0)
+  })
+})

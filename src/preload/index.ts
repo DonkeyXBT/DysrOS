@@ -70,6 +70,11 @@ const api = {
   deleteAllData: (includeAccounts: boolean) =>
     ipcRenderer.invoke('delete-all-data', includeAccounts),
   deleteRecord: (kind: string, id: string) => ipcRenderer.invoke('delete-record', kind, id),
+  setStatus: (kind: string, ids: string[], status: string) =>
+    ipcRenderer.invoke('set-status', kind, ids, status),
+  clearStatusOverride: (kind: string, ids: string[]) =>
+    ipcRenderer.invoke('clear-status-override', kind, ids),
+  statusOverrides: (kind: string) => ipcRenderer.invoke('status-overrides', kind),
   discordSettings: () => ipcRenderer.invoke('discord-settings'),
   discordSetWebhook: (url: string) => ipcRenderer.invoke('discord-set-webhook', url),
   discordSetRule: (event: string, enabled: boolean) =>

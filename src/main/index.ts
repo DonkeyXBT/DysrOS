@@ -658,6 +658,18 @@ app.whenReady().then(() => {
     return result
   })
 
+  handle('set-status', (kind: 'item' | 'shipment', ids: string[], status: string) => {
+    const changed = service.setStatus(kind, ids, status)
+    mainWindow?.webContents.send('mail-updated', { status: kind })
+    return changed
+  })
+  handle('clear-status-override', (kind: 'item' | 'shipment', ids: string[]) => {
+    const cleared = service.clearStatusOverride(kind, ids)
+    mainWindow?.webContents.send('mail-updated', { status: kind })
+    return cleared
+  })
+  handle('status-overrides', (kind: 'item' | 'shipment') => service.statusOverrides(kind))
+
   handle('discord-settings', () => service.discordSettings())
   handle('discord-set-webhook', (url: string) => service.setDiscordWebhook(url))
   handle('discord-set-rule', (event: string, enabled: boolean) => {

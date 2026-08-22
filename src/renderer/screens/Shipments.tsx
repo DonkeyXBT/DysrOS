@@ -6,6 +6,7 @@ import { ContextMenu, useContextMenu } from '../ContextMenu.js'
 import { Confirm } from '../Confirm.js'
 import { Thumb } from '../Thumb.js'
 import { RedirectDialog } from '../Redirect.js'
+import { useSelectAll } from '../select-all.js'
 
 const GRID = 'grid-template-columns:26px 70px 110px 170px minmax(160px,1fr) 130px 100px 96px'
 
@@ -36,6 +37,11 @@ const STATUS_LABEL: Record<string, string> = {
   exception: 'Exception',
   unknown: 'Unknown',
 }
+
+/** What a parcel can be set to by hand, in the order a parcel travels. */
+const MANUAL_STATUSES = [
+  'pending', 'in_transit', 'out_for_delivery', 'ready_for_pickup', 'delivered', 'exception',
+] as const
 
 export function Shipments({ query, dataVersion }: { query: string; dataVersion: number }) {
   const [shipments, setShipments] = useState<ShipmentView[] | null>(null)
@@ -69,6 +75,11 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   // Computed before the early returns: hooks must run on every render.
   const paged = usePaged(rows, term)
 
+  // Everything the search shows, not just this page: the search is what was
+  // narrowed down, and it is what "all" means afterwards.
+  const selectAll = () => setPicked(rows.map((parcel) => parcel.id))
+  useSelectAll(selectAll)
+
   if (!shipments) {
     return <SkeletonTable columns={gridStyle().gridTemplateColumns as string} minWidth={880} rows={8} />
   }
@@ -76,6 +87,37 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
   const redirectable = shipments.filter((s) => s.dhlRedirectable)
   const awaiting = shipments.filter((s) => s.trackingNumber === null)
   const pickedParcels = redirectable.filter((parcel) => picked.includes(parcel.id))
+
+  /**
+   * The status menu behind a status.
+   *
+   * A parcel inside the selection moves the whole selection — a courier who
+   * left six parcels at the neighbour's did not leave one.
+   */
+  const statusMenu = (event: React.MouseEvent, shipment: ShipmentView) => {
+    const targets = picked.includes(shipment.id) ? picked : [shipment.id]
+    const title = targets.length > 1
+      ? `${targets.length} parcels`
+      : shipment.trackingNumber ?? shipment.linked
+
+    open(event, title, [
+      ...MANUAL_STATUSES.map((status) => ({
+        label: STATUS_LABEL[status]!,
+        disabled: targets.length === 1 && shipment.status === status,
+        onSelect: async () => {
+          await api.setStatus('shipment', targets, status)
+          load()
+        },
+      })),
+      {
+        label: 'Follow the mail again',
+        onSelect: async () => {
+          await api.clearStatusOverride('shipment', targets)
+          load()
+        },
+      },
+    ])
+  }
 
   if (shipments.length === 0) {
     return (
@@ -170,7 +212,7 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
             tick box and its right-click menu say so where the parcel is. This
             bar exists only once something is picked, because then there is an
             action waiting to be taken. */}
-        {pickedParcels.length > 0 && (
+        {(picked.length > 0 || term) && (
           <div
             style={{
               display: 'flex', alignItems: 'center', gap: 12, padding: '10px 14px',
@@ -178,28 +220,31 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
             }}
           >
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent-bright)' }}>
-              {pickedParcels.length} selected
+              {picked.length > 0 ? `${picked.length} selected` : `${rows.length} shown`}
             </span>
-            <span style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>
-              to the nearest ServicePoint instead of your door
-            </span>
+            {pickedParcels.length > 0 && (
+              <span style={{ fontSize: 11.5, color: 'var(--text-dimmer)' }}>
+                {pickedParcels.length} can go to a ServicePoint instead of your door
+              </span>
+            )}
             <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }}>
-              <button
-                className="btn"
-                style={{ borderColor: '#2b3a5e', color: 'var(--accent-bright)' }}
-                onClick={() => setRedirecting(pickedParcels)}
-              >
-                Redirect {pickedParcels.length}
-              </button>
-              {pickedParcels.length < redirectable.length && (
+              {pickedParcels.length > 0 && (
                 <button
                   className="btn"
-                  onClick={() => setPicked(redirectable.map((parcel) => parcel.id))}
+                  style={{ borderColor: '#2b3a5e', color: 'var(--accent-bright)' }}
+                  onClick={() => setRedirecting(pickedParcels)}
                 >
-                  Select all {redirectable.length}
+                  Redirect {pickedParcels.length}
                 </button>
               )}
-              <button className="btn" onClick={() => setPicked([])}>Clear</button>
+              {picked.length < rows.length && (
+                <button className="btn" onClick={selectAll} title="Ctrl+A">
+                  Select all {rows.length}
+                </button>
+              )}
+              {picked.length > 0 && (
+                <button className="btn" onClick={() => setPicked([])}>Clear</button>
+              )}
             </div>
           </div>
         )}
@@ -377,8 +422,16 @@ export function Shipments({ query, dataVersion }: { query: string; dataVersion: 
                     </div>
                   </div>
                   <div>
+                    {/* The status is the control. Nothing marks it as one: a
+                        caret on every row of a long table is noise, and the
+                        status is the obvious thing to click to change. */}
                     <span
-                      className="chip"
+                      className="chip chip-menu"
+                      title="Click to set this status by hand"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        statusMenu(event, shipment)
+                      }}
                       style={{
                         color: STATUS_COLOR[shipment.status],
                         background: `color-mix(in oklab, ${STATUS_COLOR[shipment.status]} 14%, transparent)`,

@@ -7,6 +7,7 @@ import { Confirm } from '../Confirm.js'
 import { Thumb } from '../Thumb.js'
 import { groupByProduct, heldUnits, type ProductGroup } from './inventory-groups.js'
 import { SellDialog } from '../Sell.js'
+import { useSelectAll } from '../select-all.js'
 
 /** The design's column set: selection, thumbnail, then the item's facts. */
 const COLUMNS = '26px 34px minmax(240px,2fr) 108px 104px 84px 92px 60px 110px'
@@ -22,6 +23,15 @@ const STATUS: Record<string, { label: string; hue: number; muted?: boolean }> = 
   cancelled: { label: 'Cancelled', hue: 265, muted: true },
   returned: { label: 'Returned', hue: 25, muted: true },
 }
+
+/**
+ * What a unit can be set to by hand.
+ *
+ * The same list the service accepts, and for the same reason: these say where
+ * the goods are. Selling is not among them — a sale carries a price, a buyer
+ * and a date, which the sell dialog asks for.
+ */
+const MANUAL_STATUSES = ['incoming', 'in_stock', 'listed', 'cancelled', 'returned'] as const
 
 function statusColour(status: string): string {
   const entry = STATUS[status]
@@ -112,6 +122,13 @@ export function Inventory({
   const paged = usePaged(filtered, `${statusFilter}|${term}|${sort.key}${sort.dir}`)
   const products = useMemo(() => groupByProduct(filtered), [filtered])
 
+  // Everything the filter shows, not everything on this page: the filter is
+  // what was just narrowed down, and it is what "all" means after narrowing.
+  const selectAll = () => setSelected(filtered.map((item) => item.id))
+  useSelectAll(() => {
+    if (view === 'units') selectAll()
+  })
+
   if (!items) return <SkeletonTable columns={COLUMNS} minWidth={MIN_WIDTH} rows={12} />
 
   if (all.length === 0) {
@@ -137,6 +154,36 @@ export function Inventory({
     await api.deleteRecord('item', item.id)
     setSelected((current) => current.filter((id) => id !== item.id))
     load()
+  }
+
+  /**
+   * The status menu behind a status.
+   *
+   * A row inside the selection moves the whole selection: ticking five units
+   * and correcting one of them means all five, the way every other action on
+   * this screen already works.
+   */
+  const statusMenu = (event: React.MouseEvent, item: ItemView) => {
+    const targets = selected.includes(item.id) ? selected : [item.id]
+    const title = targets.length > 1 ? `${targets.length} units` : item.title
+
+    open(event, title, [
+      ...MANUAL_STATUSES.map((status) => ({
+        label: STATUS[status]!.label,
+        disabled: targets.length === 1 && item.status === status,
+        onSelect: async () => {
+          await api.setStatus('item', targets, status)
+          load()
+        },
+      })),
+      {
+        label: 'Follow the mail again',
+        onSelect: async () => {
+          await api.clearStatusOverride('item', targets)
+          load()
+        },
+      },
+    ])
   }
 
   return (
@@ -198,6 +245,11 @@ export function Inventory({
             </Chip>
           ))}
         <div style={{ flex: 1 }} />
+        {view === 'units' && filtered.length > 0 && selected.length < filtered.length && (
+          <button className="btn" onClick={selectAll} title="Ctrl+A">
+            Select all {filtered.length}
+          </button>
+        )}
         <span className="mono" style={{ fontSize: 11.5, color: 'var(--text-dim)' }}>
           {held.length} held · €{(capital / 100).toFixed(2)} tied up
         </span>
@@ -356,8 +408,16 @@ export function Inventory({
                   </div>
 
                   <div>
+                    {/* The status is the control. Nothing announces it: a
+                        caret on every row of a long table is noise, and the
+                        status is the obvious thing to click to change it. */}
                     <span
-                      className="chip"
+                      className="chip chip-menu"
+                      title="Click to set this status by hand"
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        statusMenu(event, item)
+                      }}
                       style={{
                         color: statusColour(item.status),
                         background: `color-mix(in oklab, ${statusColour(item.status)} 14%, transparent)`,
